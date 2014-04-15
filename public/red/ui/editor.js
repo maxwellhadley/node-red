@@ -55,7 +55,11 @@ RED.editor = function() {
                     if (input.attr('type') === "checkbox") {
                         input.prop('checked',node[d]);
                     } else {
-                        input.val(node[d]||"");
+                        var val = node[d];
+                        if (node[d] == null) {
+                            val = "";
+                        }
+                        input.val(val);
                     }
                 }
                 $("#node-input-"+d).change(function() {
@@ -69,12 +73,17 @@ RED.editor = function() {
                             }
                         };
                 }());
-                $("#node-input-"+d).change();
             }
         }
         if (node._def.oneditprepare) {
             node._def.oneditprepare.call(node);
         }
+        if (node._def.defaults) {
+            for (var d in node._def.defaults) {
+                $("#node-input-"+d).change();
+            }
+        }
+
         $( "#dialog" ).dialog("option","title","Edit "+node.type+" node").dialog( "open" );
     }
     
@@ -99,7 +108,7 @@ RED.editor = function() {
         if (valid && "validate" in node._def.defaults[property]) {
             valid = node._def.defaults[property].validate.call(node,value);
         }
-        if (valid && node._def.defaults[property].type && RED.nodes.getType(node._def.defaults[property].type)) {
+        if (valid && node._def.defaults[property].type && RED.nodes.getType(node._def.defaults[property].type) && !("validate" in node._def.defaults[property])) {
             if (!value || value == "_ADD_") {
                 valid = false;
             } else {
@@ -475,6 +484,7 @@ RED.editor = function() {
                 }
             },
             close: function(e) {
+                $("#dialog-config-form").html("");
                 if (RED.view.state() != RED.state.EDITING) {
                     RED.keyboard.enable();
                 }
