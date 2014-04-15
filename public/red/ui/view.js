@@ -38,7 +38,6 @@ RED.view = function() {
         moving_set = [],
         dirty = false,
         lasso = null,
-        active_group = null;
         pressTimer = null;
 
     var clipboard = "";
@@ -66,6 +65,39 @@ RED.view = function() {
         .attr('height', space_height)
         .attr('fill','#fff');
 
+    //var gridScale = d3.scale.linear().range([0,2000]).domain([0,2000]);
+    //var grid = vis.append('g');
+    //
+    //grid.selectAll("line.horizontal").data(gridScale.ticks(100)).enter()
+    //    .append("line")
+    //        .attr(
+    //        {
+    //            "class":"horizontal",
+    //            "x1" : 0,
+    //            "x2" : 2000,
+    //            "y1" : function(d){ return gridScale(d);},
+    //            "y2" : function(d){ return gridScale(d);},
+    //            "fill" : "none",
+    //            "shape-rendering" : "crispEdges",
+    //            "stroke" : "#eee",
+    //            "stroke-width" : "1px"
+    //        });
+    //grid.selectAll("line.vertical").data(gridScale.ticks(100)).enter()
+    //    .append("line")
+    //        .attr(
+    //        {
+    //            "class":"vertical",
+    //            "y1" : 0,
+    //            "y2" : 2000,
+    //            "x1" : function(d){ return gridScale(d);},
+    //            "x2" : function(d){ return gridScale(d);},
+    //            "fill" : "none",
+    //            "shape-rendering" : "crispEdges",
+    //            "stroke" : "#eee",
+    //            "stroke-width" : "1px"
+    //        });
+
+
     var drag_line = vis.append("svg:path").attr("class", "drag_line");
 
     var workspace_tabs = RED.tabs.create({
@@ -85,7 +117,7 @@ RED.view = function() {
             }
             var scrollStartLeft = chart.scrollLeft();
             var scrollStartTop = chart.scrollTop();
-            
+
             activeWorkspace = tab.id;
             if (workspaceScrollPositions[activeWorkspace]) {
                 chart.scrollLeft(workspaceScrollPositions[activeWorkspace].left);
@@ -100,7 +132,7 @@ RED.view = function() {
                 mouse_position[0] += scrollDeltaLeft;
                 mouse_position[1] += scrollDeltaTop;
             }
-            
+
             clearSelection();
             RED.nodes.eachNode(function(n) {
                     n.dirty = true;
@@ -290,28 +322,42 @@ RED.view = function() {
             }
         } else if (mouse_mode == RED.state.MOVING_ACTIVE || mouse_mode == RED.state.IMPORT_DRAGGING) {
             var mousePos = mouse_position;
-            if (d3.event.shiftKey && moving_set.length > 1) {
-                mousePos[0] = 20*Math.floor(mousePos[0]/20);
-                mousePos[1] = 20*Math.floor(mousePos[1]/20);
-            }
             var minX = 0;
             var minY = 0;
-            for (var n in moving_set) {
+            for (var n = 0; n<moving_set.length; n++) {
                 var node = moving_set[n];
+                if (d3.event.shiftKey) {
+                    node.n.ox = node.n.x;
+                    node.n.oy = node.n.y;
+                }
                 node.n.x = mousePos[0]+node.dx;
                 node.n.y = mousePos[1]+node.dy;
-                if (d3.event.shiftKey && moving_set.length == 1) {
-                    node.n.x = 20*Math.floor(node.n.x/20);
-                    node.n.y = 20*Math.floor(node.n.y/20);
-                }
+                node.n.dirty = true;
                 minX = Math.min(node.n.x-node.n.w/2-5,minX);
                 minY = Math.min(node.n.y-node.n.h/2-5,minY);
             }
-            for (var n in moving_set) {
-                var node = moving_set[n];
-                node.n.x -= minX;
-                node.n.y -= minY;
-                node.n.dirty = true;
+            if (minX != 0 || minY != 0) {
+                for (var n = 0; n<moving_set.length; n++) {
+                    var node = moving_set[n];
+                    node.n.x -= minX;
+                    node.n.y -= minY;
+                }
+            }
+            if (d3.event.shiftKey && moving_set.length > 0) {
+                var gridOffset =  [0,0];
+                var node = moving_set[0];
+                gridOffset[0] = node.n.x-(20*Math.floor((node.n.x-node.n.w/2)/20)+node.n.w/2);
+                gridOffset[1] = node.n.y-(20*Math.floor(node.n.y/20));
+                if (gridOffset[0] != 0 || gridOffset[1] != 0) {
+                    for (var n = 0; n<moving_set.length; n++) {
+                        var node = moving_set[n];
+                        node.n.x -= gridOffset[0];
+                        node.n.y -= gridOffset[1];
+                        if (node.n.x == node.n.ox && node.n.y == node.n.oy) {
+                            node.dirty = false;
+                        }
+                    }
+                }
             }
         }
         redraw();
@@ -468,12 +514,13 @@ RED.view = function() {
             RED.keyboard.remove(/* backspace */ 8);
             RED.keyboard.remove(/* delete */ 46);
             RED.keyboard.remove(/* c */ 67);
+            RED.keyboard.remove(/* x */ 88);
         } else {
             RED.keyboard.add(/* backspace */ 8,function(){deleteSelection();d3.event.preventDefault();});
             RED.keyboard.add(/* delete */ 46,function(){deleteSelection();d3.event.preventDefault();});
             RED.keyboard.add(/* c */ 67,{ctrl:true},function(){copySelection();d3.event.preventDefault();});
+            RED.keyboard.add(/* x */ 88,{ctrl:true},function(){copySelection();deleteSelection();d3.event.preventDefault();});
         }
-
         if (moving_set.length == 1) {
             RED.sidebar.info.refresh(moving_set[0].n);
         } else {
@@ -670,9 +717,6 @@ RED.view = function() {
     function redraw() {
         vis.attr("transform","scale("+scaleFactor+")");
         outer.attr("width", space_width*scaleFactor).attr("height", space_height*scaleFactor);
-        outer_background.attr('fill', function() {
-                return active_group == null?'#fff':'#eee';
-        });
 
         if (mouse_mode != RED.state.JOINING) {
             // Don't bother redrawing nodes if we're drawing links
@@ -734,7 +778,7 @@ RED.view = function() {
 
                     var mainRect = node.append("rect")
                         .attr("class", "node")
-                        .classed("node_unknown",function(d) { return d.type == "unknown"; }) 
+                        .classed("node_unknown",function(d) { return d.type == "unknown"; })
                         .attr("rx", 6)
                         .attr("ry", 6)
                         .attr("fill",function(d) { return d._def.color;})
@@ -781,6 +825,8 @@ RED.view = function() {
                         text.attr('text-anchor','end');
                     }
 
+                    //node.append("circle").attr({"class":"centerDot","cx":0,"cy":0,"r":5});
+
                     if (d._def.inputs > 0) {
                         text.attr("x",30);
                         node.append("rect").attr("class","port port_input").attr("rx",3).attr("ry",3).attr("x",-5).attr("width",10).attr("height",10)
@@ -807,6 +853,7 @@ RED.view = function() {
                             d.h = Math.max(node_height,(d.outputs||0) * 15);
                         }
                         var thisNode = d3.select(this);
+                        //thisNode.selectAll(".centerDot").attr({"cx":function(d) { return d.w/2;},"cy":function(d){return d.h/2}});
                         thisNode.attr("transform", function(d) { return "translate(" + (d.x-d.w/2) + "," + (d.y-d.h/2) + ")"; });
                         thisNode.selectAll(".node")
                             .attr("width",function(d){return d.w})
@@ -858,7 +905,7 @@ RED.view = function() {
                                 (d._def.label?' '+(typeof d._def.labelStyle == "function" ? d._def.labelStyle.call(d):d._def.labelStyle):'') ;
                         });
                         thisNode.selectAll(".node_tools").attr("x",function(d){return d.w-35;}).attr("y",function(d){return d.h-20;});
-                            
+
                         thisNode.selectAll(".node_changed")
                             .attr("x",function(d){return d.w-10})
                             .classed("hidden",function(d) { return !d.changed; });
@@ -866,7 +913,7 @@ RED.view = function() {
                         thisNode.selectAll(".node_error")
                             .attr("x",function(d){return d.w-10-(d.changed?13:0)})
                             .classed("hidden",function(d) { return d.valid; });
-                            
+
                         thisNode.selectAll(".port_input").each(function(d,i) {
                                 var port = d3.select(this);
                                 port.attr("y",function(d){return (d.h/2)-5;})
@@ -966,7 +1013,7 @@ RED.view = function() {
 
         link.classed("link_selected", function(d) { return d === selected_link || d.selected; });
         link.classed("link_unknown",function(d) { return d.target.type == "unknown" || d.source.type == "unknown"});
-        
+
         if (d3.event) {
             d3.event.preventDefault();
         }
@@ -1014,7 +1061,7 @@ RED.view = function() {
                 if (mouse_position == null) {
                     mouse_position = [0,0];
                 }
-                
+
                 var minX = 0;
                 var minY = 0;
 

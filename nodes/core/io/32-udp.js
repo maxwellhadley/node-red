@@ -30,17 +30,23 @@ function UDPin(n) {
     var server = dgram.createSocket('udp4');
 
     server.on("error", function (err) {
-        //console.log("udp listener error:\n" + err.stack);
-        if ((err.code == "EACCES") && (node.port < 1024)) { node.error("UDP access error, you may need root access for ports below 1024"); }
-        else { node.error("UDP error : "+err.code); }
+        if ((err.code == "EACCES") && (node.port < 1024)) {
+            node.error("UDP access error, you may need root access for ports below 1024");
+        } else { 
+            node.error("UDP error : "+err.code);
+        }
         server.close();
     });
 
     server.on('message', function (message, remote) {
         var msg;
-        if (node.datatype =="base64") { msg = { payload:message.toString('base64'), fromip:remote.address+':'+remote.port }; }
-        else if (node.datatype =="utf8") { msg = { payload:message.toString('utf8'), fromip:remote.address+':'+remote.port }; }
-        else { msg = { payload:message, fromip:remote.address+':'+remote.port, ip:remote.address, port:remote.port }; }
+        if (node.datatype =="base64") {
+            msg = { payload:message.toString('base64'), fromip:remote.address+':'+remote.port };
+        } else if (node.datatype =="utf8") {
+            msg = { payload:message.toString('utf8'), fromip:remote.address+':'+remote.port };
+        } else {
+            msg = { payload:message, fromip:remote.address+':'+remote.port, ip:remote.address, port:remote.port };
+        }
         node.send(msg);
     });
 
@@ -49,9 +55,19 @@ function UDPin(n) {
         node.log('udp listener at ' + address.address + ":" + address.port);
         if (node.multicast == "true") {
             server.setBroadcast(true);
-            server.setMulticastTTL(128);
-            server.addMembership(node.group,node.iface);
-            node.log("udp multicast group "+node.group);
+            try {
+                server.setMulticastTTL(128);
+                server.addMembership(node.group,node.iface);
+                node.log("udp multicast group "+node.group);
+            } catch (e) {
+                if (e.errno == "EINVAL") { 
+                    node.error("Bad Multicast Address");
+                } else if (e.errno == "ENODEV") {
+                    node.error("Must be ip address of the required interface");
+                } else {
+                    node.error("Error :"+e.errno);
+                }
+            }
         }
     });
 
@@ -59,11 +75,12 @@ function UDPin(n) {
         try {
             server.close();
             node.log('udp listener stopped');
+        } catch (err) {
+            node.error(err);
         }
-        catch (err) { console.log(err); }
     });
 
-    server.bind(node.port);
+    server.bind(node.port,node.iface);
 }
 RED.nodes.registerType("udp in",UDPin);
 
@@ -73,6 +90,7 @@ function UDPout(n) {
     RED.nodes.createNode(this,n);
     //this.group = n.group;
     this.port = n.port;
+    this.outport = n.outport||"";
     this.base64 = n.base64;
     this.addr = n.addr;
     this.iface = n.iface || null;
@@ -81,35 +99,58 @@ function UDPout(n) {
 
     var sock = dgram.createSocket('udp4');  // only use ipv4 for now
 
-    if (this.multicast != "false") {
-        sock.bind(node.port, function() {     // have to bind before you can enable broadcast...
-            sock.setBroadcast(true);        // turn on broadcast
-            if (this.multicast == "multi") {
-                sock.setMulticastTTL(128);
-                sock.addMembership(node.addr,node.iface);   // Add to the multicast group
-                node.log('udp multicast ready : '+node.addr+":"+node.port);
+    if (node.multicast != "false") {
+        if (node.outport == "") { node.outport = node.port; }
+        sock.bind(node.outport, function() {    // have to bind before you can enable broadcast...
+            sock.setBroadcast(true);            // turn on broadcast
+            if (node.multicast == "multi") {
+                try {
+                    sock.setMulticastTTL(128);
+                    sock.addMembership(node.addr,node.iface);   // Add to the multicast group
+                    node.log('udp multicast ready : '+node.outport+' -> '+node.addr+":"+node.port);
+                } catch (e) {
+                    if (e.errno == "EINVAL") {
+                        node.error("Bad Multicast Address");
+                    } else if (e.errno == "ENODEV") {
+                        node.error("Must be ip address of the required interface");
+                    } else {
+                        node.error("Error :"+e.errno);
+                    }
+                }
+            } else {
+                node.log('udp broadcast ready : '+node.outport+' -> '+node.addr+":"+node.port);
             }
-            else node.log('udp broadcast ready : '+node.addr+":"+node.port);
         });
+    } else if (node.outport != "") {
+        sock.bind(node.outport);
+        node.log('udp ready : '+node.outport+' -> '+node.addr+":"+node.port);
+    } else {
+        node.log('udp ready : '+node.addr+":"+node.port);
     }
-
-    else node.log('udp ready : '+node.addr+":"+node.port);
 
     node.on("input", function(msg) {
         if (msg.payload != null) {
             var add = node.addr || msg.ip || "";
             var por = node.port || msg.port || 0;
-            if (add == "") { node.warn("udp: ip address not set"); }
-            else if (por == 0) { node.warn("udp: port not set"); }
-            else if (isNaN(por) || (por < 1) || (por > 65535))  { node.warn("udp: port number not valid"); }
-            else {
+            if (add == "") {
+                node.warn("udp: ip address not set");
+            } else if (por == 0) {
+                node.warn("udp: port not set");
+            } else if (isNaN(por) || (por < 1) || (por > 65535)) {
+                node.warn("udp: port number not valid");
+            } else {
                 var message;
-                if (node.base64) { message = new Buffer(b64string, 'base64'); }
-                else if (msg.payload instanceof Buffer) { message = msg.payload; }
-                else { message = new Buffer(""+msg.payload); }
-                //console.log("UDP send :",add,por,msg.payload.toString());
+                if (node.base64) {
+                    message = new Buffer(b64string, 'base64');
+                } else if (msg.payload instanceof Buffer) {
+                    message = msg.payload;
+                } else {
+                    message = new Buffer(""+msg.payload);
+                }
                 sock.send(message, 0, message.length, por, add, function(err, bytes) {
-                    if (err) node.error("udp : "+err);
+                    if (err) {
+                        node.error("udp : "+err);
+                    }
                 });
             }
         }
@@ -119,8 +160,9 @@ function UDPout(n) {
         try {
             sock.close();
             node.log('udp output stopped');
+        } catch (err) {
+            node.error(err);
         }
-        catch (err) { console.log(err); }
     });
 }
 RED.nodes.registerType("udp out",UDPout);

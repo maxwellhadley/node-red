@@ -20,30 +20,7 @@ var path = require("path");
 var clone = require("clone");
 var events = require("./events");
 var storage = null;
-
-function getCallerFilename(type) {
-    //if (type == "summary") {
-    //    var err = new Error();
-    //    console.log(err.stack);
-    //    return null;
-    //}
-    // Save original Error.prepareStackTrace
-    var origPrepareStackTrace = Error.prepareStackTrace;
-    // Override with function that just returns `stack`
-    Error.prepareStackTrace = function (_, stack) {
-        return stack;
-    }
-    // Create a new `Error`, which automatically gets `stack`
-    var err = new Error();
-    // Evaluate `err.stack`, which calls our new `Error.prepareStackTrace`
-    var stack = err.stack;
-    // Restore original `Error.prepareStackTrace`
-    Error.prepareStackTrace = origPrepareStackTrace;
-    // Remove superfluous function call on stack
-    stack.shift();
-    stack.shift();
-    return stack[0].getFileName();
-}
+var settings = null;
 
 var registry = (function() {
         var nodes = {};
@@ -89,35 +66,28 @@ registry.addLogHandler(ConsoleLogHandler);
 
 var node_type_registry = (function() {
         var node_types = {};
-        var node_configs = {};
+        var node_configs = [];
         var obj = {
             register: function(type,node) {
                 util.inherits(node, Node);
-                var callerFilename = getCallerFilename(type);
-                if (callerFilename == null) {
-                    util.log("["+type+"] unable to determine filename");
-                } else {
-                    var configFilename = callerFilename.replace(/\.js$/,".html");
-                    if (fs.existsSync(configFilename)) {
-                        node_types[type] = node;
-                        if (! node_configs[configFilename]) {
-                            node_configs[configFilename] = fs.readFileSync(configFilename,'utf8');
-                        }
-                        events.emit("type-registered",type);
-                    } else {
-                        util.log("["+type+"] missing template file: "+configFilename);
-                    }
-                }
+                node_types[type] = node;
+                events.emit("type-registered",type);
+            },
+            registerConfig: function(config) {
+                node_configs.push(config);
             },
             get: function(type) {
                 return node_types[type];
             },
             getNodeConfigs: function() {
                 var result = "";
-                for (var nt in node_configs) {
-                    result += node_configs[nt];
+                for (var i=0;i<node_configs.length;i++) {
+                    result += node_configs[i];
                 }
                 return result;
+            },
+            count: function() {
+                return Object.keys(node_types).length;
             }
         }
         return obj;
@@ -178,10 +148,14 @@ Node.prototype.send = function(msg) {
                                 delete mm.req;
                                 delete mm.res;
                                 var m = clone(mm);
-                                m.req = req;
-                                m.res = res;
-                                mm.req = req;
-                                mm.res = res;
+                                if (req) {
+                                    m.req = req;
+                                    mm.req = req;
+                                }
+                                if (res) {
+                                    m.res = res;
+                                    mm.res = res;
+                                }
                                 node.receive(m);
                             }
                         }
@@ -233,7 +207,33 @@ function createNode(node,def) {
     Node.call(node,def);
 }
 
-function load(settings) {
+function load(_settings) {
+    settings = _settings;
+    
+    var RED = require("./red.js");
+    
+    function loadNode(nodeDir, nodeFn) {
+        
+        if (settings.nodesExcludes) {
+            for (var i=0;i<settings.nodesExcludes.length;i++) {
+                if (settings.nodesExcludes[i] == nodeFn) {
+                    return;
+                }
+            }
+        }
+        var nodeFilename = path.join(nodeDir,nodeFn);
+        var r = require(nodeFilename);
+        if (typeof r === "function") {
+            r(RED);
+        }
+        var templateFilename = nodeFilename.replace(/\.js$/,".html");
+        if (fs.existsSync(templateFilename)) {
+            node_type_registry.registerConfig(fs.readFileSync(templateFilename,'utf8'));
+        } else {
+            util.log("["+type+"] missing template file: "+templateFilename);
+        }
+    }
+    
     function scanForNodes(dir) {
         var pm = path.join(dir,"node_modules");
         if (fs.existsSync(pm)) {
@@ -249,7 +249,8 @@ function load(settings) {
                             for (var i in nrn) {
                                 console.log("  ",i,":",nrn[i]);
                                 try {
-                                    require(path.join(pm,fn,nrn[i]));
+                                    var nodeDir = path.join(pm,fn);
+                                    loadNode(nodeDir,nrn[i]);
                                 } catch(err) {
                                     util.log("["+i+"] "+err);
                                     //console.log(err.stack);
@@ -269,34 +270,43 @@ function load(settings) {
     
     function loadNodes(dir) {
         var errors = [];
-        fs.readdirSync(dir).sort().filter(function(fn){
-                var stats = fs.statSync(path.join(dir,fn));
-                if (stats.isFile()) {
-                    if (/\.js$/.test(fn)) {
-                        try {
-                            require(path.join(dir,fn));
-                        } catch(err) {
-                            errors.push({fn:fn, err:err});
-                            //util.log("["+fn+"] "+err);
-                            //console.log(err.stack);
+        if (fs.existsSync(dir)) {
+            fs.readdirSync(dir).sort().filter(function(fn){
+                    var stats = fs.statSync(path.join(dir,fn));
+                    if (stats.isFile()) {
+                        if (/\.js$/.test(fn)) {
+                            try {
+                                loadNode(dir,fn);
+                            } catch(err) {
+                                errors.push({fn:fn, err:err});
+                                //util.log("["+fn+"] "+err);
+                                //console.log(err.stack);
+                            }
+                        }
+                    } else if (stats.isDirectory()) {
+                        // Ignore /.dirs/, /lib/ /node_modules/ 
+                        if (!/^(\..*|lib|icons|node_modules|test)$/.test(fn)) {
+                            errors = errors.concat(loadNodes(path.join(dir,fn)));
+                        } else if (fn === "icons") {
+                            events.emit("node-icon-dir",path.join(dir,fn));
                         }
                     }
-                } else if (stats.isDirectory()) {
-                    // Ignore /.dirs/, /lib/ /node_modules/ 
-                    if (!/^(\..*|lib|icons|node_modules)$/.test(fn)) {
-                        errors = errors.concat(loadNodes(path.join(dir,fn)));
-                    } else if (fn === "icons") {
-                        events.emit("node-icon-dir",path.join(dir,fn));
-                    }
-                }
-        });
+            });
+        }
         return errors;
     }
     var errors = loadNodes(__dirname+"/../nodes");
     scanForNodes(__dirname+"/../nodes");
     if (settings.nodesDir) {
-        errors = errors.concat(loadNodes(settings.nodesDir));
-        scanForNodes(settings.nodesDir);
+        var dir = settings.nodesDir;
+        if (typeof settings.nodesDir == "string") {
+            dir = [dir];
+        }
+        
+        for (var i=0;i<dir.length;i++) {
+            errors = errors.concat(loadNodes(dir[i]));
+            scanForNodes(dir[i]);
+        }
     }
     //console.log(errors);
     return errors;
@@ -414,6 +424,7 @@ module.exports = {
     deleteCredentials: deleteCredentials,
     createNode: createNode,
     registerType: node_type_registry.register,
+    getType: node_type_registry.get,
     getNodeConfigs: node_type_registry.getNodeConfigs,
     addLogHandler: registry.addLogHandler,
     load: load,
