@@ -14,23 +14,22 @@
  * limitations under the License.
  **/
 
-var RED = require(process.env.NODE_RED_HOME+"/red/red");
+module.exports = function(RED) {
+    var util = require("util");
+    var vm = require("vm");
+    var fs = require('fs');
+    var fspath = require('path');
 
-var util = require("util");
-var vm = require("vm");
-var fs = require('fs');
-var fspath = require('path');
-
-function FunctionNode(n) {
-    RED.nodes.createNode(this,n);
-    this.name = n.name;
-    this.func = n.func;
-    var functionText = "var results = (function(msg){"+this.func+"\n})(msg);";
-    this.topic = n.topic;
-    this.context = {global:RED.settings.functionGlobalContext || {}};
-    try {
-        this.script = vm.createScript(functionText);
-        this.on("input", function(msg) {
+    function FunctionNode(n) {
+        RED.nodes.createNode(this,n);
+        this.name = n.name;
+        this.func = n.func;
+        var functionText = "var results = (function(msg){"+this.func+"\n})(msg);";
+        this.topic = n.topic;
+        this.context = {global:RED.settings.functionGlobalContext || {}};
+        try {
+            this.script = vm.createScript(functionText);
+            this.on("input", function(msg) {
                 if (msg != null) {
                     var sandbox = {msg:msg,console:console,util:util,Buffer:Buffer,context:this.context};
                     try {
@@ -58,14 +57,15 @@ function FunctionNode(n) {
                         this.send(results);
 
                     } catch(err) {
-                        this.error(err.message);
+                        this.error(err);
                     }
                 }
-        });
-    } catch(err) {
-        this.error(err.message);
+            });
+        } catch(err) {
+            this.error(err);
+        }
     }
-}
 
-RED.nodes.registerType("function",FunctionNode);
-RED.library.register("functions");
+    RED.nodes.registerType("function",FunctionNode);
+    RED.library.register("functions");
+}

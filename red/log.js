@@ -1,5 +1,5 @@
 /**
- * Copyright 2013 IBM Corp.
+ * Copyright 2014 IBM Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,19 +14,26 @@
  * limitations under the License.
  **/
 
-module.exports = function(RED) {
-    var sentiment = require('sentiment');
+var util = require("util");
+var EventEmitter = require("events").EventEmitter;
+
+var logHandlers = [];
+
+var ConsoleLogHandler = new EventEmitter();
+ConsoleLogHandler.on("log",function(msg) {
+        util.log("["+msg.level+"] ["+msg.type+":"+(msg.name||msg.id)+"] "+msg.msg);
+});
+
+var log = module.exports = {
+    addHandler: function(func) {
+        
+    },
     
-    function SentimentNode(n) {
-        RED.nodes.createNode(this,n);
-        var node = this;
-    
-        this.on("input", function(msg) {
-            sentiment(msg.payload, msg.overrides || null, function (err, result) {
-                msg.sentiment = result;
-                node.send(msg);
-            });
-        });
+    log: function(msg) {
+        for (var i in logHandlers) {
+            logHandlers[i].emit("log",msg);
+        }
     }
-    RED.nodes.registerType("sentiment",SentimentNode);
 }
+
+log.addHandler(ConsoleLogHandler);

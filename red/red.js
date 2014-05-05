@@ -18,6 +18,8 @@ var events = require("./events");
 var server = require("./server");
 var nodes = require("./nodes");
 var library = require("./library");
+var log = require("./log");
+var fs = require("fs");
 var settings = null;
 
 var path = require('path');
@@ -34,12 +36,22 @@ var RED = {
         library.init();
         return server.app;
     },
+    
+    version: function() {
+        var p = require(path.join(process.env.NODE_RED_HOME,"package.json"));
+        if (fs.existsSync(path.join(process.env.NODE_RED_HOME,".git"))) {
+            return p.version+".git";
+        } else {
+            return p.version;
+        }
+    },
 
     start: server.start,
     stop: server.stop,
     nodes: nodes,
     library: library,
-    events: events
+    events: events,
+    log: log
 };
 
 RED.__defineGetter__("app", function() { console.log("Deprecated use of RED.app - use RED.httpAdmin instead"); return server.app });

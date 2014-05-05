@@ -14,17 +14,16 @@
  * limitations under the License.
  **/
 
-var RED = require(process.env.NODE_RED_HOME+"/red/red");
+module.exports = function(RED) {
+    var mustache = require("mustache");
+    var util = require("util");
+    var fs = require('fs');
 
-var mustache = require("mustache");
-var util = require("util");
-var fs = require('fs');
-
-function TemplateNode(n) {
-    RED.nodes.createNode(this,n);
-    this.name = n.name;
-    this.template = n.template;
-    this.on("input", function(msg) {
+    function TemplateNode(n) {
+        RED.nodes.createNode(this,n);
+        this.name = n.name;
+        this.template = n.template;
+        this.on("input", function(msg) {
             if (msg != null) {
                 try {
                     msg.payload = mustache.render(this.template,msg)
@@ -33,9 +32,9 @@ function TemplateNode(n) {
                     this.error(err.message);
                 }
             }
-    });
+        });
+    }
+
+    RED.nodes.registerType("template",TemplateNode);
+    RED.library.register("templates");
 }
-
-RED.nodes.registerType("template",TemplateNode);
-
-RED.library.register("templates");

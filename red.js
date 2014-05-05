@@ -44,6 +44,7 @@ nopt.invalidHandler = function(k,v,t) {
 var parsedArgs = nopt(knownOpts,shortHands,process.argv,2)
 
 if (parsedArgs.help) {
+    console.log("Node-RED v"+RED.version());
     console.log("Usage: node red.js [-v] [-?] [--settings settings.js] [flows.json]");
     console.log("");
     console.log("Options:");
@@ -163,6 +164,16 @@ function getListenPath() {
 
 RED.start().then(function() {
     if (settings.httpAdminRoot !== false || settings.httpNodeRoot !== false || settings.httpStatic) {
+        server.on('error', function(err) {
+            if (err.errno === "EADDRINUSE") {
+                util.log('[red] Unable to listen on '+getListenPath());
+                util.log('[red] Error: port in use');
+            } else {
+                util.log('[red] Uncaught Exception:');
+                util.log(err.stack);
+            }
+            process.exit(1);
+        });
         server.listen(settings.uiPort,settings.uiHost,function() {
             if (settings.httpAdminRoot === false) {
                 util.log('[red] Admin UI disabled');
@@ -176,14 +187,9 @@ RED.start().then(function() {
 
 
 process.on('uncaughtException',function(err) {
-        if (err.errno === "EADDRINUSE") {
-            util.log('[red] Unable to listen on '+getListenPath());
-            util.log('[red] Error: port in use');
-        } else {
-            util.log('[red] Uncaught Exception:');
-            util.log(err.stack);
-        }
-        process.exit(1);
+    util.log('[red] Uncaught Exception:');
+    util.log(err.stack);
+    process.exit(1);
 });
 
 process.on('SIGINT', function () {
