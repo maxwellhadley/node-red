@@ -15,6 +15,7 @@
  **/
 
 module.exports = function(RED) {
+    "use strict";
     var util = require("util");
     var vm = require("vm");
     var fs = require('fs');
@@ -45,7 +46,7 @@ module.exports = function(RED) {
                             for (var m in results) {
                                 if (results[m]) {
                                     if (util.isArray(results[m])) {
-                                        for (var n in results[m]) {
+                                        for (var n=0; n < results[m].length; n++) {
                                             results[m][n]._topic = msg._topic;
                                         }
                                     } else {
@@ -57,7 +58,7 @@ module.exports = function(RED) {
                         this.send(results);
 
                     } catch(err) {
-                        this.error(err);
+                        this.error(err.toString());
                     }
                 }
             });

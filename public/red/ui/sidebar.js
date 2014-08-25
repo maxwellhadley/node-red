@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  **/
-RED.sidebar = function() {
+RED.sidebar = (function() {
 
     //$('#sidebar').tabs();
     var sidebar_tabs = RED.tabs.create({
@@ -33,72 +33,98 @@ RED.sidebar = function() {
         //content.style.position = "absolute";
         //$('#sidebar').tabs("refresh");
     }
-    
-    $('#btn-sidebar').click(function() {toggleSidebar();});
-    RED.keyboard.add(/* SPACE */ 32,{ctrl:true},function(){toggleSidebar();d3.event.preventDefault();});
 
     var sidebarSeparator =  {};
     $("#sidebar-separator").draggable({
             axis: "x",
             start:function(event,ui) {
+                sidebarSeparator.closing = false;
+                sidebarSeparator.opening = false;
                 var winWidth = $(window).width();
                 sidebarSeparator.start = ui.position.left;
-                sidebarSeparator.width = $("#sidebar").width();
                 sidebarSeparator.chartWidth = $("#workspace").width();
                 sidebarSeparator.chartRight = winWidth-$("#workspace").width()-$("#workspace").offset().left-2;
-                sidebarSeparator.closing = false;
+
+
+                if (!RED.menu.isSelected("btn-sidebar")) {
+                    sidebarSeparator.opening = true;
+                    var newChartRight = 15;
+                    $("#sidebar").addClass("closing");
+                    $("#workspace").css("right",newChartRight);
+                    $("#chart-zoom-controls").css("right",newChartRight+20);
+                    $("#sidebar").width(0);
+                    RED.menu.setSelected("btn-sidebar",true);
+                    RED.view.resize();
+                }
+
+                
+                sidebarSeparator.width = $("#sidebar").width();
             },
             drag: function(event,ui) {
                 var d = ui.position.left-sidebarSeparator.start;
                 var newSidebarWidth = sidebarSeparator.width-d;
+                if (sidebarSeparator.opening) {
+                    newSidebarWidth -= 13;
+                }
                 
-                if (newSidebarWidth > 180 && sidebarSeparator.chartWidth+d > 200) {
-                    var newChartRight = sidebarSeparator.chartRight-d;
-                    $("#workspace").css("right",newChartRight);
-                    $("#chart-zoom-controls").css("right",newChartRight+20);
-                    $("#sidebar").width(newSidebarWidth);
+                if (newSidebarWidth > 150) {
+                    if (sidebarSeparator.chartWidth+d < 200) {
+                        ui.position.left = 200+sidebarSeparator.start-sidebarSeparator.chartWidth;
+                        d = ui.position.left-sidebarSeparator.start;
+                        newSidebarWidth = sidebarSeparator.width-d;
+                    }
                 }
-                if (newSidebarWidth < 150 && !sidebarSeparator.closing) {
-                    $("#sidebar").addClass("closing");
-                    sidebarSeparator.closing = true;
-                }
-                if (newSidebarWidth >= 150 && sidebarSeparator.closing) {
+                    
+                if (newSidebarWidth < 150) {
+                    if (!sidebarSeparator.closing) {
+                        $("#sidebar").addClass("closing");
+                        sidebarSeparator.closing = true;
+                    }
+                    if (!sidebarSeparator.opening) {
+                        newSidebarWidth = 150;
+                        ui.position.left = sidebarSeparator.width-(150 - sidebarSeparator.start);
+                        d = ui.position.left-sidebarSeparator.start;
+                    }
+                } else if (newSidebarWidth > 150 && (sidebarSeparator.closing || sidebarSeparator.opening)) {
                     sidebarSeparator.closing = false;
                     $("#sidebar").removeClass("closing");
                 }
+
+                var newChartRight = sidebarSeparator.chartRight-d;
+                $("#workspace").css("right",newChartRight);
+                $("#chart-zoom-controls").css("right",newChartRight+20);
+                $("#sidebar").width(newSidebarWidth);
+
                 sidebar_tabs.resize();
                 RED.view.resize();
                     
             },
             stop:function(event,ui) {
-                $("#sidebar-separator").css("left","auto");
-                $("#sidebar-separator").css("right",($("#sidebar").width()+15)+"px");
+                RED.view.resize();
                 if (sidebarSeparator.closing) {
                     $("#sidebar").removeClass("closing");
-                    toggleSidebar();
+                    RED.menu.setSelected("btn-sidebar",false);
+                    if ($("#sidebar").width() < 180) {
+                        $("#sidebar").width(180);
+                        $("#workspace").css("right",208);
+                        $("#chart-zoom-controls").css("right",228);
+                    }
                 }
+                $("#sidebar-separator").css("left","auto");
+                $("#sidebar-separator").css("right",($("#sidebar").width()+13)+"px");
             }
     });
     
-    function toggleSidebar() {
-        //if ($('#sidebar').tabs( "option", "active" ) === false) {
-        //    $('#sidebar').tabs( "option", "active",0);
-        //}
-        var btnSidebar = $("#btn-sidebar");
-        btnSidebar.toggleClass("active");
-        
-        if (!btnSidebar.hasClass("active")) {
+    function toggleSidebar(state) {
+        if (!state) {
             $("#main-container").addClass("sidebar-closed");
         } else {
             $("#main-container").removeClass("sidebar-closed");
         }
     }
-    toggleSidebar();
     
     function showSidebar(id) {
-        if (!$("#btn-sidebar").hasClass("active")) {
-            toggleSidebar();
-        }
+        RED.menu.setSelected("btn-sidebar",true);
         sidebar_tabs.activateTab("tab-"+id);
     }
     
@@ -106,10 +132,18 @@ RED.sidebar = function() {
         return sidebar_tabs.contains("tab-"+id);
     }
     
+    
+    $(function() {
+        RED.keyboard.add(/* SPACE */ 32,{ctrl:true},function(){RED.menu.setSelected("btn-sidebar",!RED.menu.isSelected("btn-sidebar"));d3.event.preventDefault();});
+        showSidebar("info");
+    });
+
+    
     return {
         addTab: addTab,
         show: showSidebar,
-        containsTab: containsTab
+        containsTab: containsTab,
+        toggleSidebar: toggleSidebar
     }
     
-}();
+})();

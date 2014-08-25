@@ -1,5 +1,5 @@
 /**
- * Copyright 2013 IBM Corp.
+ * Copyright 2013,2014 IBM Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,13 @@
  **/
 
 module.exports = function(RED) {
+    "use strict";
     var reconnectTime = RED.settings.socketReconnectTime||10000;
     var socketTimeout = RED.settings.socketTimeout||null;
     var net = require('net');
-    
+
     var connectionPool = {};
-    
+
     function TcpIn(n) {
         RED.nodes.createNode(this,n);
         this.host = n.host;
@@ -33,20 +34,22 @@ module.exports = function(RED) {
         this.server = (typeof n.server == 'boolean')?n.server:(n.server == "server");
         this.closing = false;
         var node = this;
-    
+
         if (!node.server) {
             var buffer = null;
             var client;
             var reconnectTimeout;
-            function setupTcpClient() {
+            var setupTcpClient = function() {
                 node.log("connecting to "+node.host+":"+node.port);
+                node.status({fill:"grey",shape:"dot",text:"connecting"});
                 var id = (1+Math.random()*4294967295).toString(16);
                 client = net.connect(node.port, node.host, function() {
                     buffer = (node.datatype == 'buffer')? new Buffer(0):"";
                     node.log("connected to "+node.host+":"+node.port);
+                    node.status({fill:"green",shape:"dot",text:"connected"});
                 });
                 connectionPool[id] = client;
-    
+
                 client.on('data', function (data) {
                     if (node.datatype != 'buffer') {
                         data = data.toString(node.datatype);
@@ -85,16 +88,17 @@ module.exports = function(RED) {
                 client.on('close', function() {
                     delete connectionPool[id];
                     node.log("connection lost to "+node.host+":"+node.port);
+                    node.status({fill:"red",shape:"ring",text:"disconnected"});
                     if (!node.closing) {
                         reconnectTimeout = setTimeout(setupTcpClient, reconnectTime);
                     }
                 });
                 client.on('error', function(err) {
-                        node.log(err);
+                    node.log(err);
                 });
             }
             setupTcpClient();
-    
+
             this.on('close', function() {
                 this.closing = true;
                 client.end();
@@ -105,13 +109,13 @@ module.exports = function(RED) {
                 if (socketTimeout !== null) { socket.setTimeout(socketTimeout); }
                 var id = (1+Math.random()*4294967295).toString(16);
                 connectionPool[id] = socket;
-    
+
                 var buffer = (node.datatype == 'buffer')? new Buffer(0):"";
                 socket.on('data', function (data) {
                     if (node.datatype != 'buffer') {
                         data = data.toString(node.datatype);
                     }
-    
+
                     if (node.stream) {
                         if ((typeof data) === "string" && node.newline != "") {
                             buffer = buffer+data;
@@ -164,7 +168,7 @@ module.exports = function(RED) {
                     node.error('unable to listen on port '+node.port+' : '+err);
                 } else {
                     node.log('listening on port '+node.port);
-        
+
                     node.on('close', function() {
                         node.closing = true;
                         server.close();
@@ -173,10 +177,10 @@ module.exports = function(RED) {
                 }
             });
         }
-    
+
     }
     RED.nodes.registerType("tcp in",TcpIn);
-    
+
     function TcpOut(n) {
         RED.nodes.createNode(this,n);
         this.host = n.host;
@@ -186,17 +190,19 @@ module.exports = function(RED) {
         this.name = n.name;
         this.closing = false;
         var node = this;
-    
+
         if (!node.beserver||node.beserver=="client") {
             var reconnectTimeout;
             var client = null;
             var connected = false;
-    
-            function setupTcpClient() {
+
+            var setupTcpClient = function() {
                 node.log("connecting to "+node.host+":"+node.port);
+                node.status({fill:"grey",shape:"dot",text:"connecting"});
                 client = net.connect(node.port, node.host, function() {
                     connected = true;
                     node.log("connected to "+node.host+":"+node.port);
+                    node.status({fill:"green",shape:"dot",text:"connected"});
                 });
                 client.on('error', function (err) {
                     node.log('error : '+err);
@@ -205,6 +211,7 @@ module.exports = function(RED) {
                 });
                 client.on('close', function() {
                     node.log("connection lost to "+node.host+":"+node.port);
+                    node.status({fill:"red",shape:"ring",text:"disconnected"});
                     connected = false;
                     client.destroy();
                     if (!node.closing) {
@@ -213,7 +220,7 @@ module.exports = function(RED) {
                 });
             }
             setupTcpClient();
-    
+
             node.on("input", function(msg) {
                 if (connected && msg.payload != null) {
                     if (Buffer.isBuffer(msg.payload)) {
@@ -225,13 +232,13 @@ module.exports = function(RED) {
                     }
                 }
             });
-    
+
             node.on("close", function() {
                 this.closing = true;
                 client.end();
                 clearTimeout(reconnectTimeout);
             });
-    
+
         } else if (node.beserver == "reply") {
             node.on("input",function(msg) {
                 if (msg._session && msg._session.type == "tcp") {
@@ -282,13 +289,13 @@ module.exports = function(RED) {
                     }
                 }
             });
-            
+
             server.on('error', function(err) {
                 if (err) {
                     node.error('unable to listen on port '+node.port+' : '+err);
                 }
             });
-    
+
             server.listen(node.port, function(err) {
                 if (err) {
                     node.error('unable to listen on port '+node.port+' : '+err);
@@ -302,6 +309,116 @@ module.exports = function(RED) {
             });
         }
     }
-    
     RED.nodes.registerType("tcp out",TcpOut);
+
+    function TcpGet(n) {
+        RED.nodes.createNode(this,n);
+        this.server = n.server;
+        this.port = Number(n.port);
+        this.out = n.out;
+        this.splitc = n.splitc;
+
+        if (this.out != "char") { this.splitc = Number(this.splitc); }
+        else { this.splitc.replace("\\n","\n").replace("\\r","\r").replace("\\t","\t").replace("\\e","\e").replace("\\f","\f").replace("\\0","\0"); }
+
+        var buf;
+        if (this.out == "count") { buf = new Buffer(this.splitc); }
+        else { buf = new Buffer(32768); } // set it to 32k... hopefully big enough for most.... but only hopefully
+
+        var node = this;
+        var client;
+
+        this.on("input", function(msg) {
+            var i = 0;
+            if (!(msg.payload instanceof Buffer)) {
+                msg.payload = msg.payload.toString();
+            }
+            client = net.Socket();
+            client.setTimeout(socketTimeout);
+            client.connect(node.port, node.server, function() {
+                //node.log('client connected');
+                client.write(msg.payload);
+            });
+            client.on('data', function(data) {
+                //node.log("data", data.length, data);
+
+                if (node.splitc === 0) {
+                    node.send({"payload": data});
+                }
+                else {
+                    for (var j = 0; j < data.length; j++ ) {
+                        if (node.out == "time")  {
+                            // do the timer thing
+                            if (node.tout) {
+                                i += 1;
+                                buf[i] = data[j];
+                            }
+                            else {
+                                node.tout = setTimeout(function () {
+                                    node.tout = null;
+                                    var m = new Buffer(i+1);
+                                    buf.copy(m,0,0,i+1);
+                                    node.send({"payload": m});
+                                    client.end();
+                                    m = null;
+                                }, node.splitc);
+                                i = 0;
+                                buf[0] = data[j];
+                            }
+                        }
+                        // count bytes into a buffer...
+                        else if (node.out == "count") {
+                            buf[i] = data[j];
+                            i += 1;
+                            if ( i >= node.serialConfig.count) {
+                                node.send({"payload": buf});
+                                client.end();
+                                i = 0;
+                            }
+                        }
+                        // look for a char
+                        else {
+                            buf[i] = data[j];
+                            i += 1;
+                            if (data[j] == node.splitc) {
+                                var m = new Buffer(i);
+                                buf.copy(m,0,0,i);
+                                node.send({"payload": m});
+                                client.end();
+                                m = null;
+                                i = 0;
+                            }
+                        }
+                    }
+                }
+
+            });
+            client.on('end', function() {
+                //node.log('client disconnected');
+            });
+            client.on('error', function() {
+                node.log('connect failed');
+                if (client) { client.end(); }
+            });
+            client.on('timeout',function() {
+                node.log('connect timeout');
+                if (client) {
+                    client.end();
+                    setTimeout(function() {
+                        client.connect(node.port, node.server, function() {
+                            //node.log('client connected');
+                            client.write(msg.payload);
+                        });
+                    },reconnectTime);
+                }
+
+            });
+        });
+
+        this.on("close", function() {
+            if (client) { buf = null; client.end(); }
+        });
+
+    }
+    RED.nodes.registerType("tcp request",TcpGet);
 }

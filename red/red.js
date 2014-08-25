@@ -14,13 +14,14 @@
  * limitations under the License.
  **/
 
-var events = require("./events");
 var server = require("./server");
 var nodes = require("./nodes");
 var library = require("./library");
+var comms = require("./comms");
 var log = require("./log");
 var fs = require("fs");
 var settings = null;
+var credentials = require("./nodes/credentials");
 
 var path = require('path');
 
@@ -32,26 +33,28 @@ var RED = {
 
     init: function(httpServer,userSettings) {
         settings = userSettings;
+        
+        var p = require(path.join(process.env.NODE_RED_HOME,"package.json"));
+        if (fs.existsSync(path.join(process.env.NODE_RED_HOME,".git"))) {
+            settings.version = p.version+".git";
+        } else {
+            settings.version = p.version;
+        }
+        
+        
         server.init(httpServer,settings);
         library.init();
         return server.app;
     },
     
-    version: function() {
-        var p = require(path.join(process.env.NODE_RED_HOME,"package.json"));
-        if (fs.existsSync(path.join(process.env.NODE_RED_HOME,".git"))) {
-            return p.version+".git";
-        } else {
-            return p.version;
-        }
-    },
-
     start: server.start,
     stop: server.stop,
     nodes: nodes,
     library: library,
+    credentials: credentials,
     events: events,
-    log: log
+    log: log,
+    comms:comms
 };
 
 RED.__defineGetter__("app", function() { console.log("Deprecated use of RED.app - use RED.httpAdmin instead"); return server.app });

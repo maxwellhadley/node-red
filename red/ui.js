@@ -14,8 +14,6 @@
  * limitations under the License.
  **/
 var express = require('express');
-var util = require('util');
-var crypto = require('crypto');
 var fs = require("fs");
 var app = express();
 var events = require("./events");
@@ -23,13 +21,16 @@ var path = require("path");
 
 var icon_paths = [path.resolve(__dirname + '/../public/icons')];
 
+var settings; // settings has to be global, otherwise variable not in scope for express
+
 events.on("node-icon-dir",function(dir) {
         icon_paths.push(path.resolve(dir));
 });
 
 
-// TODO: nothing here uses settings... so does this need to be a function?
-function setupUI(settings) {
+function setupUI(_settings) {
+    
+    settings = _settings; // TODO confirm if settings are needed
     
     // Need to ensure the url ends with a '/' so the static serving works
     // with relative paths
@@ -41,20 +42,30 @@ function setupUI(settings) {
         }
     });
     
+    var iconCache = {};
+    //TODO: create a default icon
+    var defaultIcon = path.resolve(__dirname + '/../public/icons/arrow-in.png');
+    
     app.get("/icons/:icon",function(req,res) {
-        for (var p in icon_paths) {
-            if (fs.existsSync(icon_paths[p]+'/'+req.params.icon)) {
-                res.sendfile(icon_paths[p]+'/'+req.params.icon);
-                return;
+        if (iconCache[req.params.icon]) {
+            res.sendfile(iconCache[req.params.icon]); // if not found, express prints this to the console and serves 404
+        } else { 
+            for (var p=0;p<icon_paths.length;p++) {
+                var iconPath = path.join(icon_paths[p],req.params.icon);
+                if (fs.existsSync(iconPath)) {
+                    res.sendfile(iconPath);
+                    iconCache[req.params.icon] = iconPath;
+                    return;
+                }
             }
+            res.sendfile(defaultIcon);
         }
-        //TODO: create a default icon
-        res.sendfile(path.resolve(__dirname + '/../public/icons/arrow-in.png'));
     });
     
     app.get("/settings", function(req,res) {
         var safeSettings = {
-            httpNodeRoot: settings.httpNodeRoot
+            httpNodeRoot: settings.httpNodeRoot,
+            version: settings.version
         };
         res.json(safeSettings);
     });
@@ -64,9 +75,4 @@ function setupUI(settings) {
     return app;
 }
 
-
-
-
-
 module.exports = setupUI;
-

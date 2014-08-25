@@ -13,14 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  **/
- 
+
 var util = require("util");
 var EventEmitter = require("events").EventEmitter;
 var clone = require("clone");
+var when = require("when");
 
 var flows = require("./flows");
-
-
+var comms = require("../comms");
 
 function Node(n) {
     this.id = n.id;
@@ -31,22 +31,41 @@ function Node(n) {
     }
     this.wires = n.wires||[];
 }
+
 util.inherits(Node,EventEmitter);
 
-Node.prototype.close = function() {
-    // called when a node is removed
-    this.emit("close");
+Node.prototype._on = Node.prototype.on;
+
+Node.prototype.on = function(event,callback) {
+    var node = this;
+    if (event == "close") {
+        if (callback.length == 1) {
+            this.close = function() {
+                return when.promise(function(resolve) {
+                    callback.call(node,function() {
+                        resolve();
+                    });
+                });
+            }
+        } else {
+            this.close = callback;
+        }
+    } else {
+        this._on(event,callback);
+    }
 }
 
+Node.prototype.close = function() {
+}
 
 Node.prototype.send = function(msg) {
     // instanceof doesn't work for some reason here
     if (msg == null) {
-        msg = [];
+        return;
     } else if (!util.isArray(msg)) {
         msg = [msg];
     }
-    for (var i in this.wires) {
+    for (var i=0;i<this.wires.length;i++) {
         var wires = this.wires[i];
         if (i < msg.length) {
             if (msg[i] != null) {
@@ -65,10 +84,10 @@ Node.prototype.send = function(msg) {
                 //    }
                 //} else {
                     // Multiple recipients, must send message copies
-                    for (var j in wires) {
+                    for (var j=0;j<wires.length;j++) {
                         var node = flows.get(wires[j]);
                         if (node) {
-                            for (var k in msgs) {
+                            for (var k=0;k<msgs.length;k++) {
                                 var mm = msgs[k];
                                 // Temporary fix for #97
                                 // TODO: remove this http-node-specific fix somehow
@@ -99,21 +118,30 @@ Node.prototype.receive = function(msg) {
     this.emit("input",msg);
 }
 
+function log_helper(self, level, msg) {
+    var o = {level:level, id:self.id, type:self.type, msg:msg};
+    if (self.name) {
+        o.name = self.name;
+    }
+    self.emit("log",o);
+}
+
 Node.prototype.log = function(msg) {
-    var o = {level:'log',id:this.id, type:this.type, msg:msg};
-    if (this.name) o.name = this.name;
-    this.emit("log",o);
+    log_helper(this, 'log', msg);
 }
+
 Node.prototype.warn = function(msg) {
-    var o = {level:'warn',id:this.id, type:this.type, msg:msg};
-    if (this.name) o.name = this.name;
-    this.emit("log",o);
+    log_helper(this, 'warn', msg);
 }
+
 Node.prototype.error = function(msg) {
-    var o = {level:'error',id:this.id, type:this.type, msg:msg};
-    if (this.name) o.name = this.name;
-    this.emit("log",o);
+    log_helper(this, 'error', msg);
 }
 
-
+/**
+ * status: { fill:"red|green", shape:"dot|ring", text:"blah" }
+ */
+Node.prototype.status = function(status) {
+    comms.publish("status/"+this.id,status,true);
+}
 module.exports = Node;

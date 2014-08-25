@@ -27,6 +27,7 @@ var promiseDir = nodeFn.lift(mkdirp);
 var settings;
 var flowsFile;
 var flowsFullPath;
+var flowsPrev;
 var credentialsFile;
 var oldCredentialsFile;
 var userDir;
@@ -59,10 +60,8 @@ function getFileMeta(root,path) {
     var fd = fs.openSync(fn,"r");
     var size = fs.fstatSync(fd).size;
     var meta = {};
-    var scanning = true;
     var read = 0;
     var length = 10;
-    var offset = 0;
     var remaining = "";
     var buffer = Buffer(length);
     while(read < size) {
@@ -92,7 +91,6 @@ function getFileBody(root,path) {
     var scanning = true;
     var read = 0;
     var length = 50;
-    var offset = 0;
     var remaining = "";
     var buffer = Buffer(length);
     while(read < size) {
@@ -122,21 +120,6 @@ function getFileBody(root,path) {
     return body;
 }
 
-function writeFile(root,path,meta,body,res) {
-    var fn = fspath.join(root,path);
-    var headers = "";
-    for (var i in meta) {
-        headers += "// "+i+": "+meta[i]+"\n";
-    }
-    mkdirp(fspath.dirname(fn), function (err) {
-        fs.writeFile(fn,headers+body,function(err) {
-            //TODO: handle error
-            res.writeHead(204, {'Content-Type': 'text/plain'});
-            res.end();
-        });
-    });
-}
-
 var localfilesystem = {
     init: function(_settings) {
         settings = _settings;
@@ -152,6 +135,7 @@ var localfilesystem = {
         var fsext = fspath.extname(flowsFile);
         credentialsFile = fspath.join(userDir,fspath.basename(flowsFile,fsext)+"_cred"+fsext);
         oldCredentialsFile = fspath.join(userDir,"credentials.json");
+        flowsPrev = fspath.join(userDir,"flows.backup");
 
         libDir = fspath.join(userDir,"lib");
         libFlowsDir = fspath.join(libDir,"flows");
@@ -176,7 +160,19 @@ var localfilesystem = {
     },
 
     saveFlows: function(flows) {
-        return nodeFn.call(fs.writeFile, flowsFullPath, JSON.stringify(flows));
+        if (fs.existsSync(flowsFullPath)) {
+            fs.renameSync(flowsFullPath,flowsPrev);
+        }
+        
+        var flowData;
+        
+        if (settings.flowFilePretty) {
+            flowData = JSON.stringify(flows,null,4);
+        } else {
+            flowData = JSON.stringify(flows);
+        }
+        
+        return nodeFn.call(fs.writeFile, flowsFullPath, flowData);
     },
 
     getCredentials: function() {
@@ -202,7 +198,14 @@ var localfilesystem = {
     },
 
     saveCredentials: function(credentials) {
-        return nodeFn.call(fs.writeFile, credentialsFile, JSON.stringify(credentials))
+        var credentialData;
+        if (settings.flowFilePretty) {
+            credentialData = JSON.stringify(credentials,null,4);
+        } else {
+            credentialData = JSON.stringify(credentials);
+        }
+        
+        return nodeFn.call(fs.writeFile, credentialsFile, credentialData)
     },
 
     getAllFlows: function() {
@@ -234,7 +237,9 @@ var localfilesystem = {
         var rootPath = fspath.join(libDir,type,path);
         return promiseDir(root).then(function () {
             return nodeFn.call(fs.lstat, rootPath).then(function(stats) {
-                if (stats.isFile()) return getFileBody(root,path);
+                if (stats.isFile()) {
+                    return getFileBody(root,path);
+                }
                 if (path.substr(-1) == '/') {
                     path = path.substr(0,path.length-1);
                 }
@@ -265,7 +270,9 @@ var localfilesystem = {
         var fn = fspath.join(libDir, type, path);
         var headers = "";
         for (var i in meta) {
-            headers += "// "+i+": "+meta[i]+"\n";
+            if (meta.hasOwnProperty(i)) {
+                headers += "// "+i+": "+meta[i]+"\n";
+            }
         }
         return promiseDir(fspath.dirname(fn)).then(function () {
             nodeFn.call(fs.writeFile, fn, headers+body);

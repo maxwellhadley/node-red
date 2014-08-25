@@ -15,18 +15,19 @@
  **/
 
 module.exports = function(RED) {
+    "use strict";
     var util = require("util");
     var exec = require('child_process').exec;
     var fs =  require('fs');
-    
+
     if (!fs.existsSync("/dev/ttyAMA0")) { // unlikely if not on a Pi
         throw "Info : Ignoring Raspberry Pi specific node.";
     }
-    
+
     if (!fs.existsSync("/usr/local/bin/gpio")) { // gpio command not installed
         throw "Info : Can't find Raspberry Pi wiringPi gpio command.";
     }
-    
+
     // Map physical P1 pins to Gordon's Wiring-Pi Pins (as they should be V1/V2 tolerant)
     var pintable = {
     // Physical : WiringPi
@@ -46,7 +47,18 @@ module.exports = function(RED) {
             "21":"13",
             "23":"14",
              "8":"15",
-            "10":"16"
+            "10":"16",
+            "27":"30",
+            "28":"31",
+            "29":"21",
+            "31":"22",
+            "32":"26",
+            "33":"23",
+            "35":"24",
+            "36":"27",
+            "37":"25",
+            "38":"28",
+            "40":"29"
     }
     var tablepin = {
     // WiringPi : Physical
@@ -66,23 +78,34 @@ module.exports = function(RED) {
            "13":"21",
            "14":"23",
            "15":"8",
-           "16":"10"
+           "16":"10",
+           "30":"27",
+           "31":"28",
+           "21":"29",
+           "22":"31",
+           "26":"32",
+           "23":"33",
+           "24":"35",
+           "27":"36",
+           "25":"37",
+           "28":"38",
+           "29":"40"
     }
-    
+
     function GPIOInNode(n) {
         RED.nodes.createNode(this,n);
         this.buttonState = -1;
         this.pin = pintable[n.pin];
         this.intype = n.intype;
         var node = this;
-    
-        if (this.pin) {
+
+        if (node.pin !== undefined) {
             exec("gpio mode "+node.pin+" "+node.intype, function(err,stdout,stderr) {
-                if (err) node.error(err);
+                if (err) { node.error(err); }
                 else {
                     node._interval = setInterval( function() {
                         exec("gpio read "+node.pin, function(err,stdout,stderr) {
-                            if (err) node.error(err);
+                            if (err) { node.error(err); }
                             else {
                                 if (node.buttonState !== Number(stdout)) {
                                     var previousState = node.buttonState;
@@ -99,61 +122,77 @@ module.exports = function(RED) {
             });
         }
         else {
-            this.error("Invalid GPIO pin: "+this.pin);
+            node.error("Invalid GPIO pin: "+node.pin);
         }
-    
-        this.on("close", function() {
-            clearInterval(this._interval);
+
+        node.on("close", function() {
+            clearInterval(node._interval);
         });
     }
-    
+
     function GPIOOutNode(n) {
         RED.nodes.createNode(this,n);
         this.pin = pintable[n.pin];
         var node = this;
-    
-        if (this.pin) {
+
+        if (node.pin !== undefined) {
             process.nextTick(function() {
                 exec("gpio mode "+node.pin+" out", function(err,stdout,stderr) {
-                    if (err) node.error(err);
+                    if (err) { node.error(err); }
                     else {
                         node.on("input", function(msg) {
-                            if (msg.payload === "true") msg.payload = true;
-                            if (msg.payload === "false") msg.payload = false;
+                            if (msg.payload === "true") { msg.payload = true; }
+                            if (msg.payload === "false") { msg.payload = false; }
                             var out = Number(msg.payload);
-                            if ((out == 0)|(out == 1)) {
+                            if ((out === 0)|(out === 1)) {
                                 exec("gpio write "+node.pin+" "+out, function(err,stdout,stderr) {
-                                    if (err) node.error(err);
+                                    if (err) { node.error(err); }
                                 });
                             }
-                            else node.warn("Invalid input - not 0 or 1");
+                            else { node.warn("Invalid input - not 0 or 1"); }
                         });
                     }
                 });
             });
         }
         else {
-            this.error("Invalid GPIO pin: "+this.pin);
+            node.error("Invalid GPIO pin: "+node.pin);
         }
-    
-        this.on("close", function() {
-            exec("gpio mode "+this.pin+" in");
+
+        node.on("close", function() {
+            exec("gpio mode "+node.pin+" in");
         });
     }
-    
-    exec("gpio mode 0 in",function(err,stdout,stderr) {
+
+    //exec("gpio mode 0 in",function(err,stdout,stderr) {
+    //    if (err) {
+    //        util.log('[36-rpi-gpio.js] Error: "gpio" command failed for some reason.');
+    //    }
+    //    exec("gpio mode 1 in");
+    //    exec("gpio mode 2 in");
+    //    exec("gpio mode 3 in");
+    //    exec("gpio mode 4 in");
+    //    exec("gpio mode 5 in");
+    //    exec("gpio mode 6 in");
+    //    exec("gpio mode 7 in");
+    //});
+
+    var pitype = { type:"" };
+    exec("gpio -v | grep Type", function(err,stdout,stderr) {
         if (err) {
-            util.log('[36-rpi-gpio.js] Error: "gpio" command failed for some reason.');
+            util.log('[36-rpi-gpio.js] Error: "gpio -v" command failed for some reason.');
         }
-        exec("gpio mode 1 in");
-        exec("gpio mode 2 in");
-        exec("gpio mode 3 in");
-        exec("gpio mode 4 in");
-        exec("gpio mode 5 in");
-        exec("gpio mode 6 in");
-        exec("gpio mode 7 in");
+        else {
+            pitype = { type:(stdout.split(","))[0].split(": ")[1], rev:(stdout.split(","))[1].split(": ")[1] };
+        }
     });
-    
+
     RED.nodes.registerType("rpi-gpio in",GPIOInNode);
     RED.nodes.registerType("rpi-gpio out",GPIOOutNode);
+
+    var querystring = require('querystring');
+    RED.httpAdmin.get('/rpi-gpio/:id',function(req,res) {
+        var credentials = RED.nodes.getCredentials(req.params.id);
+        res.send( JSON.stringify(pitype) );
+    });
 }

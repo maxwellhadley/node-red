@@ -15,15 +15,22 @@
  **/
 
 module.exports = function(RED) {
+    "use strict";
     var ntwitter = require('twitter-ng');
     var OAuth= require('oauth').OAuth;
-    
+
     function TwitterNode(n) {
         RED.nodes.createNode(this,n);
         this.screen_name = n.screen_name;
     }
-    RED.nodes.registerType("twitter-credentials",TwitterNode);
-    
+    RED.nodes.registerType("twitter-credentials",TwitterNode,{
+        credentials: {
+            screen_name: {type:"text"},
+            access_token: {type: "password"},
+            access_token_secret: {type:"password"}
+        }       
+    });
+
     function TwitterInNode(n) {
         RED.nodes.createNode(this,n);
         this.active = true;
@@ -34,7 +41,7 @@ module.exports = function(RED) {
         this.topic = n.topic||"tweets";
         this.twitterConfig = RED.nodes.getNode(this.twitter);
         var credentials = RED.nodes.getCredentials(this.twitter);
-    
+
         if (credentials && credentials.screen_name == this.twitterConfig.screen_name) {
             var twit = new ntwitter({
                 consumer_key: "OKjYEd1ef2bfFolV25G5nQ",
@@ -42,15 +49,15 @@ module.exports = function(RED) {
                 access_token_key: credentials.access_token,
                 access_token_secret: credentials.access_token_secret
             });
-    
-            
+
+
             //setInterval(function() {
             //        twit.get("/application/rate_limit_status.json",null,function(err,cb) {
             //                console.log("direct_messages:",cb["resources"]["direct_messages"]);
             //        });
-            //        
+            //
             //},10000);
-            
+
             var node = this;
             if (this.user === "user") {
                 node.poll_ids = [];
@@ -62,7 +69,7 @@ module.exports = function(RED) {
                             screen_name:user,
                             trim_user:0,
                             count:1
-                    },function() { 
+                    },function() {
                         var u = user+"";
                         return function(err,cb) {
                             if (err) {
@@ -139,7 +146,7 @@ module.exports = function(RED) {
                             });
                     },120000));
                 });
-                
+
             } else if (this.tags !== "") {
                 try {
                     var thing = 'statuses/filter';
@@ -154,8 +161,8 @@ module.exports = function(RED) {
                             node.warn("twitter: possible bad geo area format. Should be lower-left lon,lat, upper-right lon,lat");
                         }
                     }
-    
-                    function setupStream() {
+
+                    var setupStream = function() {
                         if (node.active) {
                             twit.stream(thing, st, function(stream) {
                                 //console.log(st);
@@ -177,7 +184,11 @@ module.exports = function(RED) {
                                     node.log("tweet rate limit hit");
                                 });
                                 stream.on('error', function(tweet,rc) {
-                                    node.warn(tweet);
+                                    if (rc == 420) {
+                                        node.warn("Twitter rate limit hit");
+                                    } else {
+                                        node.warn("Stream error:"+tweet.toString()+" ("+rc+")");
+                                    }
                                     setTimeout(setupStream,10000);
                                 });
                                 stream.on('destroy', function (response) {
@@ -200,7 +211,7 @@ module.exports = function(RED) {
         } else {
             this.error("missing twitter credentials");
         }
-    
+
         this.on('close', function() {
             if (this.stream) {
                 this.active = false;
@@ -214,8 +225,8 @@ module.exports = function(RED) {
         });
     }
     RED.nodes.registerType("twitter in",TwitterInNode);
-    
-    
+
+
     function TwitterOutNode(n) {
         RED.nodes.createNode(this,n);
         this.topic = n.topic;
@@ -223,7 +234,7 @@ module.exports = function(RED) {
         this.twitterConfig = RED.nodes.getNode(this.twitter);
         var credentials = RED.nodes.getCredentials(this.twitter);
         var node = this;
-    
+
         if (credentials && credentials.screen_name == this.twitterConfig.screen_name) {
             var twit = new ntwitter({
                 consumer_key: "OKjYEd1ef2bfFolV25G5nQ",
@@ -250,7 +261,7 @@ module.exports = function(RED) {
         }
     }
     RED.nodes.registerType("twitter out",TwitterOutNode);
-    
+
     var oa = new OAuth(
         "https://api.twitter.com/oauth/request_token",
         "https://api.twitter.com/oauth/access_token",
@@ -260,24 +271,8 @@ module.exports = function(RED) {
         null,
         "HMAC-SHA1"
     );
-    
-    var credentials = {};
-    
-    RED.httpAdmin.get('/twitter/:id', function(req,res) {
-        var credentials = RED.nodes.getCredentials(req.params.id);
-        if (credentials) {
-            res.send(JSON.stringify({sn:credentials.screen_name}));
-        } else {
-            res.send(JSON.stringify({}));
-        }
-    });
-    
-    RED.httpAdmin.delete('/twitter/:id', function(req,res) {
-        RED.nodes.deleteCredentials(req.params.id);
-        res.send(200);
-    });
-    
-    RED.httpAdmin.get('/twitter/:id/auth', function(req, res){
+
+    RED.httpAdmin.get('/twitter-credentials/:id/auth', function(req, res){
         var credentials = {};
         oa.getOAuthRequestToken({
                 oauth_callback: req.query.callback
@@ -296,11 +291,11 @@ module.exports = function(RED) {
             }
         });
     });
-    
-    RED.httpAdmin.get('/twitter/:id/auth/callback', function(req, res, next){
+
+    RED.httpAdmin.get('/twitter-credentials/:id/auth/callback', function(req, res, next){
         var credentials = RED.nodes.getCredentials(req.params.id);
         credentials.oauth_verifier = req.query.oauth_verifier;
-    
+
         oa.getOAuthAccessToken(
             credentials.oauth_token,
             credentials.token_secret,

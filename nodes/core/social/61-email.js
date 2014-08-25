@@ -1,5 +1,5 @@
 /**
- * Copyright 2013 IBM Corp.
+ * Copyright 2013,2014 IBM Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,21 +15,18 @@
  **/
 
 module.exports = function(RED) {
+    "use strict";
     var util = require('util');
     var nodemailer = require("nodemailer");
-    var Imap = null;
-    try {
-        Imap = require('imap');
-    } catch (e) {
-        util.log("[61-email.js] - imap npm not installed - no inbound email available");
-    }
-    
+    var Imap = require('imap');
+
     //console.log(nodemailer.Transport.transports.SMTP.wellKnownHosts);
-    
-    // module.exports = { service: "Gmail", user: "blahblah@gmail.com", pass: "password", server: "imap.gmail.com", port: "993" }
-    try { var globalkeys = RED.settings.email || require(process.env.NODE_RED_HOME+"/../emailkeys.js"); }
-    catch(err) { }
-    
+
+    try {
+        var globalkeys = RED.settings.email || require(process.env.NODE_RED_HOME+"/../emailkeys.js");
+    } catch(err) {
+    }
+
     function EmailNode(n) {
         RED.nodes.createNode(this,n);
         this.topic = n.topic;
@@ -37,50 +34,66 @@ module.exports = function(RED) {
         this.outserver = n.server;
         this.outport = n.port;
         var flag = false;
-        var credentials = RED.nodes.getCredentials(n.id);
-        if ((credentials) && (credentials.hasOwnProperty("userid"))) { this.userid = credentials.userid; }
-        else {
-            if (globalkeys) { this.userid = globalkeys.user; flag = true; }
-            else { this.error("No e-mail userid set"); }
+        if (this.credentials && this.credentials.hasOwnProperty("userid")) {
+            this.userid = this.credentials.userid;
+        } else {
+            if (globalkeys) {
+                this.userid = globalkeys.user;
+                flag = true;
+            } else {
+                this.error("No e-mail userid set");
+            }
         }
-        if ((credentials) && (credentials.hasOwnProperty("password"))) { this.password = credentials.password; }
-        else {
-            if (globalkeys) { this.password = globalkeys.pass; flag = true; }
-            else { this.error("No e-mail password set"); }
+        if (this.credentials && this.credentials.hasOwnProperty("password")) {
+            this.password = this.credentials.password;
+        } else {
+            if (globalkeys) {
+                this.password = globalkeys.pass;
+                flag = true;
+            } else {
+                this.error("No e-mail password set");
+            }
         }
-        if (flag) { RED.nodes.addCredentials(n.id,{userid:this.userid, password:this.password, global:true}); }
+        if (flag) {
+            RED.nodes.addCredentials(n.id,{userid:this.userid, password:this.password, global:true});
+        }
         var node = this;
-    
-        var smtpTransport = nodemailer.createTransport("SMTP",{
-            //service: emailkey.service,
-            // {
-            //transport: 'SMTP',
+
+        var smtpTransport = nodemailer.createTransport({
             host: node.outserver,
             port: node.outport,
-            requiresAuth: true,
-            secureConnection: true,
-            //domains: [ 'gmail.com', 'googlemail.com' ],
-            //},
+            secure: true,
             auth: {
                 user: node.userid,
                 pass: node.password
             }
         });
-    
+
         this.on("input", function(msg) {
-            //node.log("email :",this.id,this.topic," received",msg.payload);
             if (msg != null) {
                 if (smtpTransport) {
+                    node.status({fill:"blue",shape:"dot",text:"sending"});
+                    var payload = msg.payload;
+                    if (Buffer.isBuffer(payload)) {
+                        payload = payload.toString();
+                    } else if (typeof payload === "object") {
+                        payload = JSON.stringify(payload);
+                    } else if (typeof payload !== "string") {
+                        payload = ""+payload;
+                    }
+                    
                     smtpTransport.sendMail({
                         from: node.userid, // sender address
                         to: node.name, // comma separated list of receivers
                         subject: msg.topic, // subject line
-                        text: msg.payload // plaintext body
-                    }, function(error, response) {
+                        text: payload // plaintext body
+                    }, function(error, info) {
                         if (error) {
                             node.error(error);
+                            node.status({fill:"red",shape:"ring",text:"send failed"});
                         } else {
-                            node.log("Message sent: " + response.message);
+                            node.log("Message sent: " + info.response);
+                            node.status({});
                         }
                     });
                 }
@@ -88,8 +101,14 @@ module.exports = function(RED) {
             }
         });
     }
-    RED.nodes.registerType("e-mail",EmailNode);
-    
+    RED.nodes.registerType("e-mail",EmailNode,{
+        credentials: {
+            userid: {type:"text"},
+            password: {type: "password"},
+            global: { type:"boolean"}
+        }       
+    });
+
     function EmailInNode(n) {
         RED.nodes.createNode(this,n);
         this.name = n.name;
@@ -97,22 +116,35 @@ module.exports = function(RED) {
         this.inserver = n.server || emailkey.server || "imap.gmail.com";
         this.inport = n.port || emailkey.port || "993";
         var flag = false;
-        var credentials = RED.nodes.getCredentials(n.id);
-        if ((credentials) && (credentials.hasOwnProperty("userid"))) { this.userid = credentials.userid; }
-        else {
-            if (globalkeys) { this.userid = globalkeys.user; flag = true; }
-            else { this.error("No e-mail userid set"); }
+        
+        if (this.credentials && this.credentials.hasOwnProperty("userid")) {
+            this.userid = this.credentials.userid;
+        } else {
+            if (globalkeys) {
+                this.userid = globalkeys.user;
+                flag = true;
+            } else {
+                this.error("No e-mail userid set");
+            }
         }
-        if ((credentials) && (credentials.hasOwnProperty("password"))) { this.password = credentials.password; }
-        else {
-            if (globalkeys) { this.password = globalkeys.pass; flag = true; }
-            else { this.error("No e-mail password set"); }
+        if (this.credentials && this.credentials.hasOwnProperty("password")) {
+            this.password = this.credentials.password;
+        } else {
+            if (globalkeys) {
+                this.password = globalkeys.pass;
+                flag = true;
+            } else {
+                this.error("No e-mail password set");
+            }
         }
-        if (flag) { RED.nodes.addCredentials(n.id,{userid:this.userid, password:this.password, global:true}); }
+        if (flag) {
+            RED.nodes.addCredentials(n.id,{userid:this.userid, password:this.password, global:true});
+        }
+
         var node = this;
         this.interval_id = null;
         var oldmail = {};
-    
+
         var imap = new Imap({
             user: node.userid,
             password: node.password,
@@ -123,16 +155,17 @@ module.exports = function(RED) {
             connTimeout: node.repeat,
             authTimeout: node.repeat
         });
-    
+
         if (!isNaN(this.repeat) && this.repeat > 0) {
             node.log("repeat = "+this.repeat);
             this.interval_id = setInterval( function() {
                 node.emit("input",{});
             }, this.repeat );
         }
-    
+
         this.on("input", function(msg) {
             imap.once('ready', function() {
+                node.status({fill:"blue",shape:"dot",text:"fetching"});
                 var pay = {};
                 imap.openBox('INBOX', true, function(err, box) {
                     if (box.messages.total > 0) {
@@ -170,6 +203,7 @@ module.exports = function(RED) {
                         });
                         f.on('error', function(err) {
                             node.warn('fetch error: ' + err);
+                            node.status({fill:"red",shape:"ring",text:"fetch error"});
                         });
                         f.on('end', function() {
                             if (JSON.stringify(pay) !== oldmail) {
@@ -178,84 +212,46 @@ module.exports = function(RED) {
                                 node.log('received new email: '+pay.topic);
                             }
                             else { node.log('duplicate not sent: '+pay.topic); }
+                            //node.status({fill:"green",shape:"dot",text:"ok"});
+                            node.status({});
                             imap.end();
                         });
                     }
                     else {
                         node.log("you have achieved inbox zero");
+                        //node.status({fill:"green",shape:"dot",text:"ok"});
+                        node.status({});
                         imap.end();
                     }
                 });
             });
-            imap.on('error', function(err) {
-                node.log(err);
-            });
+            node.status({fill:"grey",shape:"dot",text:"connecting"});
             imap.connect();
         });
-    
+
+        imap.on('error', function(err) {
+            node.log(err);
+            node.status({fill:"red",shape:"ring",text:"connect error"});
+        });
+
         this.on("error", function(err) {
             node.log("error: ",err);
         });
-    
+
         this.on("close", function() {
             if (this.interval_id != null) {
                 clearInterval(this.interval_id);
             }
             if (imap) { imap.destroy(); }
         });
-    
+
         node.emit("input",{});
     }
-    if (Imap != null) {
-    RED.nodes.registerType("e-mail in",EmailInNode);
-    }
-    
-    var querystring = require('querystring');
-    
-    RED.httpAdmin.get('/email/global',function(req,res) {
-        res.send(JSON.stringify({hasToken:!(globalkeys && globalkeys.userid && globalkeys.password)}));
-    });
-    
-    RED.httpAdmin.get('/email/:id',function(req,res) {
-        var credentials = RED.nodes.getCredentials(req.params.id);
-        if (credentials) {
-            res.send(JSON.stringify({userid:credentials.userid,hasPassword:(credentials.password&&credentials.password!="")}));
-        }
-        else if (globalkeys && globalkeys.user && globalkeys.pass) {
-            RED.nodes.addCredentials(req.params.id,{userid:globalkeys.user, password:globalkeys.pass, global:true});
-            credentials = RED.nodes.getCredentials(req.params.id);
-            res.send(JSON.stringify({userid:credentials.userid,global:credentials.global,hasPassword:(credentials.password&&credentials.password!="")}));
-        }
-        else {
-            res.send(JSON.stringify({}));
-        }
-    });
-    
-    RED.httpAdmin.delete('/email/:id',function(req,res) {
-        RED.nodes.deleteCredentials(req.params.id);
-        res.send(200);
-    });
-    
-    RED.httpAdmin.post('/email/:id',function(req,res) {
-        var body = "";
-        req.on('data', function(chunk) {
-            body+=chunk;
-        });
-        req.on('end', function(){
-            var newCreds = querystring.parse(body);
-            var credentials = RED.nodes.getCredentials(req.params.id)||{};
-            if (newCreds.userid == null || newCreds.userid == "") {
-                delete credentials.userid;
-            } else {
-                credentials.userid = newCreds.userid;
-            }
-            if (newCreds.password == "") {
-                delete credentials.password;
-            } else {
-                credentials.password = newCreds.password||credentials.password;
-            }
-            RED.nodes.addCredentials(req.params.id,credentials);
-            res.send(200);
-        });
+    RED.nodes.registerType("e-mail in",EmailInNode,{
+        credentials: {
+            userid: {type:"text"},
+            password: {type: "password"},
+            global: { type:"boolean"}
+        }       
     });
 }

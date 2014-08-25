@@ -18,9 +18,31 @@ var credentials = require("./credentials");
 var flows = require("./flows");
 var Node = require("./Node");
 
+/**
+ * Registers a node constructor
+ * @param type - the string type name
+ * @param constructor - the constructor function for this node type
+ * @param opts - optional additional options for the node
+ */
+function registerType(type,constructor,opts) {
+    if (opts && opts.credentials) {
+        credentials.register(type,opts.credentials);
+    }
+    registry.registerType(type,constructor);    
+}
 
+/**
+ * Called from a Node's constructor function, invokes the super-class
+ * constructor and attaches any credentials to the node.
+ * @param node the node object being created
+ * @param def the instance definition for the node 
+ */
 function createNode(node,def) {
     Node.call(node,def);
+    var creds = credentials.get(node.id);
+    if (creds) {
+        node.credentials = creds;
+    }
 }
 
 function init(_settings,storage) {
@@ -30,21 +52,57 @@ function init(_settings,storage) {
 }
 
 
+function removeNode(info) {
+    var nodeInfo = registry.getNodeInfo(info);
+    if (!nodeInfo) {
+        throw new Error("Unrecognised type/id: "+info);
+    }
+    var inUse = {};
+    flows.each(function(n) {
+        inUse[n.type] = (inUse[n.type]||0)+1;
+    });
+    var nodesInUse = [];
+    nodeInfo.types.forEach(function(t) {
+        if (inUse[t]) {
+            nodesInUse.push(t);
+        }
+    });
+    if (nodesInUse.length > 0) {
+        var msg = nodesInUse.join(", ");
+        throw new Error("Type in use: "+msg);
+    }
+    return registry.removeNode(nodeInfo.id);
+}
+
 module.exports = {
+    // Lifecycle
     init: init,
     load: registry.load,
-    addCredentials: credentials.add,
-    getCredentials: credentials.get,
-    deleteCredentials: credentials.delete,
+    
+    // Node registry
     createNode: createNode,
-    registerType: registry.registerType,
-    getType: registry.get,
-    getNodeConfigs: registry.getNodeConfigs,
     getNode: flows.get,
     
+    addNode: registry.addNode,
+    removeNode: removeNode,
+    
+    // Node type registry
+    registerType: registerType,
+    getType: registry.get,
+    getNodeList: registry.getNodeList,
+    getNodeConfigs: registry.getNodeConfigs,
+    getNodeConfig: registry.getNodeConfig,
+    clearRegistry: registry.clear,
+    
+    // Flow handling
     loadFlows: flows.load,
     stopFlows: flows.stopFlows,
     setFlows: flows.setFlows,
-    getFlows: flows.getFlows
+    getFlows: flows.getFlows,
+    
+    // Credentials
+    addCredentials: credentials.add,
+    getCredentials: credentials.get,
+    deleteCredentials: credentials.delete
 }
 

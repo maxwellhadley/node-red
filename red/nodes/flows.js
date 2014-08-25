@@ -16,7 +16,7 @@
 
 var util = require("util");
 var when = require("when");
- 
+
 var typeRegistry = require("./registry");
 var credentials = require("./credentials");
 var log = require("../log");
@@ -34,29 +34,36 @@ events.on('type-registered',function(type) {
             if (i != -1) {
                 missingTypes.splice(i,1);
                 util.log("[red] Missing type registered: "+type);
-            }
-            if (missingTypes.length == 0) {
-                parseConfig();
+                if (missingTypes.length === 0) {
+                    parseConfig();
+                }
             }
         }
 });
 
-
-var parseConfig = function() {
+/**
+ * Parses the current activeConfig and creates the required node instances
+ */ 
+function parseConfig() {
+    var i;
+    var nt;
     missingTypes = [];
-    for (var i in activeConfig) {
+    
+    // Scan the configuration for any unknown node types
+    for (i=0;i<activeConfig.length;i++) {
         var type = activeConfig[i].type;
         // TODO: remove workspace in next release+1
         if (type != "workspace" && type != "tab") {
-            var nt = typeRegistry.get(type);
+            nt = typeRegistry.get(type);
             if (!nt && missingTypes.indexOf(type) == -1) {
                 missingTypes.push(type);
             }
         }
-    };
+    }
+    // Abort if there are any missing types
     if (missingTypes.length > 0) {
         util.log("[red] Waiting for missing types to be registered:");
-        for (var i in missingTypes) {
+        for (i=0;i<missingTypes.length;i++) {
             util.log("[red]  - "+missingTypes[i]);
         }
         return;
@@ -64,11 +71,13 @@ var parseConfig = function() {
 
     util.log("[red] Starting flows");
     events.emit("nodes-starting");
-    for (var i in activeConfig) {
+    
+    // Instantiate each node in the flow
+    for (i=0;i<activeConfig.length;i++) {
         var nn = null;
         // TODO: remove workspace in next release+1
         if (activeConfig[i].type != "workspace" && activeConfig[i].type != "tab") {
-            var nt = typeRegistry.get(activeConfig[i].type);
+            nt = typeRegistry.get(activeConfig[i].type);
             if (nt) {
                 try {
                     nn = new nt(activeConfig[i]);
@@ -78,7 +87,7 @@ var parseConfig = function() {
                 }
             }
             // console.log(nn);
-            if (nn == null) {
+            if (nn === null) {
                 util.log("[red] unknown type: "+activeConfig[i].type);
             }
         }
@@ -88,18 +97,25 @@ var parseConfig = function() {
     events.emit("nodes-started");
 }
 
-
+/**
+ * Stops the current activeConfig
+ */
 function stopFlows() {
     if (activeConfig&&activeConfig.length > 0) {
         util.log("[red] Stopping flows");
     }
-    flowNodes.clear();
+    return flowNodes.clear();
 }
 
 var flowNodes = module.exports = {
     init: function(_storage) {
         storage = _storage;
     },
+    
+    /**
+     * Load the current activeConfig from storage and start it running
+     * @return a promise for the loading of the config
+     */
     load: function() {
         return storage.getFlows().then(function(flows) {
             return credentials.load().then(function() {
@@ -112,39 +128,93 @@ var flowNodes = module.exports = {
             util.log("[red] Error loading flows : "+err);
         });
     },
+    
+    /**
+     * Add a node to the current active set
+     * @param n the node to add
+     */
     add: function(n) {
         nodes[n.id] = n;
         n.on("log",log.log);
     },
+    
+    /**
+     * Get a node
+     * @param i the node id
+     * @return the node
+     */
     get: function(i) {
         return nodes[i];
     },
+    
+    /**
+     * Stops all active nodes and clears the active set
+     * @return a promise for the stopping of all active nodes
+     */
     clear: function() {
-        events.emit("nodes-stopping");
-        for (var n in nodes) {
-            nodes[n].close();
-        }
-        events.emit("nodes-stopped");
-        nodes = {};
-    },
-    each: function(cb) {
-        for (var n in nodes) {
-            cb(nodes[n]);
-        }
-    },
-    addLogHandler: function(handler) {
-        logHandlers.push(handler);
+        return when.promise(function(resolve) {
+            events.emit("nodes-stopping");
+            var promises = [];
+            for (var n in nodes) {
+                if (nodes.hasOwnProperty(n)) {
+                    try {
+                        var p = nodes[n].close();
+                        if (p) {
+                            promises.push(p);
+                        }
+                    } catch(err) {
+                        nodes[n].error(err);
+                    }
+                }
+            }
+            when.settle(promises).then(function() {
+                events.emit("nodes-stopped");
+                nodes = {};
+                resolve();
+            });
+        });
     },
     
+    /**
+     * Provides an iterator over the active set of nodes
+     * @param cb a function to be called for each node in the active set
+     */
+    each: function(cb) {
+        for (var n in nodes) {
+            if (nodes.hasOwnProperty(n)) {
+                cb(nodes[n]);
+            }
+        }
+    },
+
+    /**
+     * @return the active configuration
+     */
     getFlows: function() {
         return activeConfig;
     },
-    setFlows: function(conf) {
-        return storage.saveFlows(conf).then(function() {
-            stopFlows();
-            activeConfig = conf;
-            parseConfig();
-        })
+    
+    /**
+     * Sets the current active config.
+     * @param config the configuration to enable
+     * @return a promise for the starting of the new flow
+     */
+    setFlows: function (config) {
+        // Extract any credential updates
+        for (var i=0; i<config.length; i++) {
+            var node = config[i];
+            if (node.credentials) {
+                credentials.extract(node);
+                delete node.credentials;
+            }
+        }
+        return credentials.save()
+            .then(function() { return storage.saveFlows(config);})
+            .then(function() { return stopFlows();})
+            .then(function () {
+                activeConfig = config;
+                parseConfig();
+            });
     },
     stopFlows: stopFlows
-}
+};

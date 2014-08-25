@@ -26,13 +26,13 @@ ConsoleLogHandler.on("log",function(msg) {
 
 var log = module.exports = {
     addHandler: function(func) {
-        
+        logHandlers.push(func);
     },
     
     log: function(msg) {
-        for (var i in logHandlers) {
-            logHandlers[i].emit("log",msg);
-        }
+        logHandlers.forEach(function(handler) {
+            handler.emit("log",msg);
+        });
     }
 }
 

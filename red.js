@@ -82,6 +82,7 @@ if (settings.https) {
 } else {
     server = http.createServer(function(req,res){app(req,res);});
 }
+server.setMaxListeners(0);
 
 function formatRoot(root) {
     if (root[0] != "/") {
@@ -183,6 +184,9 @@ RED.start().then(function() {
     } else {
         util.log('[red] Running in headless mode');
     }
+}).otherwise(function(err) {
+    util.log("[red] Failed to start server:");
+    util.log(err.stack);
 });
 
 

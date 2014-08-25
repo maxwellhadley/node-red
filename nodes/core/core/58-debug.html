@@ -18,15 +18,15 @@
     <div class="form-row">
         <label for="node-input-complete"><i class="icon-list"></i> Output</label>
         <select type="text" id="node-input-complete" style="display: inline-block; width: 250px; vertical-align: top;">
-            <option value=false>payload only</option>
-            <option value=true>complete msg object</option>
+            <option value="false">payload only</option>
+            <option value="true">complete msg object</option>
         </select>
     </div>
     <div class="form-row">
         <label for="node-input-console"><i class="icon-random"></i> to</label>
         <select type="text" id="node-input-console" style="display: inline-block; width: 250px; vertical-align: top;">
-            <option value=false>debug tab</option>
-            <option value=true>debug tab and console</option>
+            <option value="false">debug tab</option>
+            <option value="true">debug tab and console</option>
         </select>
     </div>
     <div class="form-row">
@@ -52,8 +52,8 @@
         defaults: {
             name: {value:""},
             active: {value:true},
-            console: {value:false},
-            complete: {value:false}
+            console: {value:"false"},
+            complete: {value:"false"}
         },
         label: function() {
             return this.name||"debug";
@@ -91,7 +91,7 @@
         }
     });
 
-    var a = function() {
+    (function() {
         var content = document.createElement("div");
         content.id = "tab-debug";
 
@@ -109,89 +109,68 @@
 
         function getTimestamp() {
             var d = new Date();
-            return d.toUTCString().substring(5,25)+"."+d.getMilliseconds();
+            return d.toLocaleString();
         }
 
         var sbc = document.getElementById("debug-content");
 
-        var errornotification = null;
-
         var messageCount = 0;
 
-
-        function debugConnect() {
-            //console.log("debug ws connecting");
-            var path = location.hostname+":"+location.port+document.location.pathname;
-            path = path+(path.slice(-1) == "/"?"":"/")+"debug/ws";
-            path = "ws"+(document.location.protocol=="https:"?"s":"")+"://"+path;
-            var ws = new WebSocket(path);
-            ws.onopen = function() {
-                if (errornotification) {
-                    errornotification.close();
-                    errornotification = null;
-                }
-                //console.log("debug ws connected");
-            }
-            ws.onmessage = function(event) {
-                var o = JSON.parse(event.data);
-                if (o.heartbeat) {
-                    return;
-                }
-                //console.log(msg);
-                var msg = document.createElement("div");
-                msg.onmouseover = function() {
-                    msg.style.borderRightColor = "#999";
-                    var n = RED.nodes.node(o.id);
-                    if (n) {
-                        n.highlighted = true;
-                        n.dirty = true;
-                    }
-                    RED.view.redraw();
-                };
-                msg.onmouseout = function() {
-                    msg.style.borderRightColor = "";
-                    var n = RED.nodes.node(o.id);
-                    if (n) {
-                        n.highlighted = false;
-                        n.dirty = true;
-                    }
-                    RED.view.redraw();
-                };
-                msg.onclick = function() {
-                    var node = RED.nodes.node(o.id);
-                    if (node) {
-                        RED.view.showWorkspace(node.z);
-                    }
-                    
-                };
-                var name = (o.name?o.name:o.id).toString().replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-                var topic = (o.topic||"").toString().replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-                var payload = (o.msg||"").toString().replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-                msg.className = 'debug-message'+(o.level?(' debug-message-level-'+o.level):'')
-                msg.innerHTML = '<span class="debug-message-date">'+getTimestamp()+'</span>'+
-                                '<span class="debug-message-name">['+name+']</span>'+
-                                (o.topic?'<span class="debug-message-topic">'+topic+'</span>':'')+
-                                '<span class="debug-message-payload">'+payload+'</span>';
-                var atBottom = (sbc.scrollHeight-messages.offsetHeight-sbc.scrollTop) < 5;
-                messageCount++;
-                $(messages).append(msg);
-
-                if (messageCount > 200) {
-                    $("#debug-content .debug-message:first").remove();
-                    messageCount--;
-                }
-                if (atBottom) {
-                    $(sbc).scrollTop(sbc.scrollHeight);
-                }
-            };
-            ws.onclose = function() {
-                if (errornotification == null) {
-                    errornotification = RED.notify("<b>Error</b>: Lost connection to server","error",true);
-                }
-                setTimeout(debugConnect,1000);
-            }
+        RED._debug = function(msg) {
+            handleDebugMessage("",{
+                name:"debug",
+                msg:msg
+            });
         }
-        debugConnect();
+
+        var handleDebugMessage = function(t,o) {
+            var msg = document.createElement("div");
+            msg.onmouseover = function() {
+                msg.style.borderRightColor = "#999";
+                var n = RED.nodes.node(o.id);
+                if (n) {
+                    n.highlighted = true;
+                    n.dirty = true;
+                }
+                RED.view.redraw();
+            };
+            msg.onmouseout = function() {
+                msg.style.borderRightColor = "";
+                var n = RED.nodes.node(o.id);
+                if (n) {
+                    n.highlighted = false;
+                    n.dirty = true;
+                }
+                RED.view.redraw();
+            };
+            msg.onclick = function() {
+                var node = RED.nodes.node(o.id);
+                if (node) {
+                    RED.view.showWorkspace(node.z);
+                }
+
+            };
+            var name = (o.name?o.name:o.id).toString().replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+            var topic = (o.topic||"").toString().replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+            var payload = (o.msg||"").toString().replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+            msg.className = 'debug-message'+(o.level?(' debug-message-level-'+o.level):'')
+            msg.innerHTML = '<span class="debug-message-date">'+getTimestamp()+'</span>'+
+                            '<span class="debug-message-name">['+name+']</span>'+
+                            (o.topic?'<span class="debug-message-topic">'+topic+'</span>':'')+
+                            '<span class="debug-message-payload">'+payload+'</span>';
+            var atBottom = (sbc.scrollHeight-messages.offsetHeight-sbc.scrollTop) < 5;
+            messageCount++;
+            $(messages).append(msg);
+
+            if (messageCount > 200) {
+                $("#debug-content .debug-message:first").remove();
+                messageCount--;
+            }
+            if (atBottom) {
+                $(sbc).scrollTop(sbc.scrollHeight);
+            }
+        };
+        RED.comms.subscribe("debug",handleDebugMessage);
 
         $("#debug-tab-clear").click(function() {
             $(".debug-message").remove();
@@ -203,7 +182,7 @@
             RED.view.redraw();
         });
 
-    }();
+    })();
 </script>
 
 <style>

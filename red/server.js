@@ -20,6 +20,7 @@ var when = require('when');
 
 var createUI = require("./ui");
 var redNodes = require("./nodes");
+var comms = require("./comms");
 
 var app = null;
 var nodeApp = null;
@@ -30,11 +31,10 @@ var storage = null;
 function createServer(_server,_settings) {
     server = _server;
     settings = _settings;
+    comms.init(_server,_settings);
     storage = require("./storage");
     app = createUI(settings);
     nodeApp = express();
-    
-    flowfile = settings.flowFile || 'flows_'+require('os').hostname()+'.json';
     
     app.get("/nodes",function(req,res) {
         res.send(redNodes.getNodeConfigs());
@@ -49,7 +49,7 @@ function createServer(_server,_settings) {
         function(req,res) {
             var flows = req.body;
             redNodes.setFlows(flows).then(function() {
-                res.json(204);
+                res.send(204);
             }).otherwise(function(err) {
                 util.log("[red] Error saving flows : "+err);
                 res.send(500,err.message);
@@ -59,23 +59,83 @@ function createServer(_server,_settings) {
             res.send(400,"Invalid Flow");
         }
     );
+    
+    app.post("/nodes",
+        express.json(),
+        function(req,res) {
+            var node = req.body;
+            if (!node.file && !node.module) {
+                res.send(400,"Invalid request");
+                return;
+            }
+            redNodes.addNode(node).then(function(info) {
+                comms.publish("node/added",info,false);
+                util.log("[red] Added node types:");
+                for (var j=0;j<info.length;j++) {
+                    for (var i=0;i<info[j].types.length;i++) {
+                        util.log("[red] - "+info[j].types[i]);
+                    }
+                }
+                res.json(info);
+            }).otherwise(function(err) {
+                res.send(400,err.toString());
+            });
+        },
+        function(err,req,res,next) {
+            res.send(400,err);
+        }
+    );
+    
+    app.delete("/nodes/:id",
+        function(req,res) {
+            var id = req.params.id;
+            try {
+                var info = redNodes.removeNode(id);
+                comms.publish("node/removed",info,false);
+                util.log("[red] Removed node types:");
+                for (var i=0;i<info.types.length;i++) {
+                    util.log("[red] - "+info.types[i]);
+                }
+                res.json(info);
+            } catch(err) {
+                res.send(400,err.toString());
+            }
+        },
+        function(err,req,res,next) {
+            res.send(400,err);
+        }
+    );
+    
+    app.get("/nodes/:id", function(req,res) {
+        var id = req.params.id;
+        var config = redNodes.getNodeConfig(id);
+        if (config) {
+            res.send(config);
+        } else {
+            res.send(404);
+        }
+    });
+    
 }
 
 function start() {
-    var RED = require("./red");
     var defer = when.defer();
     
     storage.init(settings).then(function() {
         console.log("\nWelcome to Node-RED\n===================\n");
-        util.log("[red] Version: "+RED.version());
+        if (settings.version) {
+            util.log("[red] Version: "+settings.version);
+        }
         util.log("[red] Loading palette nodes");
         redNodes.init(settings,storage);
-        redNodes.load().then(function(nodeErrors) {
+        redNodes.load().then(function() {
+            var nodes = redNodes.getNodeList();
+            var nodeErrors = nodes.filter(function(n) { return n.err!=null;});
             if (nodeErrors.length > 0) {
                 util.log("------------------------------------------");
                 if (settings.verbose) {
                     for (var i=0;i<nodeErrors.length;i+=1) {
-                        util.log("["+nodeErrors[i].fn+"] "+nodeErrors[i].err);
+                        util.log("["+nodeErrors[i].name+"] "+nodeErrors[i].err);
                     }
                 } else {
                     util.log("[red] Failed to register "+nodeErrors.length+" node type"+(nodeErrors.length==1?"":"s"));
@@ -87,6 +147,9 @@ function start() {
             
             redNodes.loadFlows();
         });
+        comms.start();
+    }).otherwise(function(err) {
+        defer.reject(err);
     });
     
     return defer.promise;
@@ -94,6 +157,7 @@ function start() {
 
 function stop() {
     redNodes.stopFlows();
+    comms.stop();
 }
 
 module.exports = { 
