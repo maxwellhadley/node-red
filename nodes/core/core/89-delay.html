@@ -36,23 +36,25 @@
           <option value="days">Days</option>
         </select>
     </div>
-    
+
     <div id="rate-details" class="form-row">
         <label for="node-input-rate"><i class="icon-time"></i> To</label>
-        <input type="text" id="node-input-rate" placeholder="1" style="direction:rtl; width:50px !important">
-        <label for="node-input-reateUnits">message(s) per</label>
+        <input type="text" id="node-input-rate" placeholder="1" style="direction:rtl; width:30px !important">
+        <label for="node-input-reateUnits">msg(s) per</label>
         <select id="node-input-rateUnits" style="width:140px !important">
           <option value="second">Second</option>
           <option value="minute">Minute</option>
           <option value="hour">Hour</option>
           <option value="day">Day</option>
         </select>
+        <br/>
+        <input style="margin: 20px 0 20px 100px; width: 30px;" type="checkbox" id="node-input-drop"><label style="width: 250px;" for="node-input-drop">drop intermediate messages</label>
     </div>
 
     <div id="random-details" class="form-row">
         <label for="node-input-randomFirst"><i class="icon-time"></i> Between</label>
         <input type="text" id="node-input-randomFirst" placeholder="" style="directon:rtl; width:30px !important">
-		<label for="node-input-randomLast" style="width:20px"> & </label>
+        <label for="node-input-randomLast" style="width:20px"> & </label>
         <input type="text" id="node-input-randomLast" placeholder="" style="directon:rtl; width:30px !important">
         <select id="node-input-randomUnits" style="width:140px !important">
           <option value="milliseconds">Milliseconds</option>
@@ -62,12 +64,12 @@
           <option value="days">Days</option>
         </select>
     </div>
-    
+
     <div class="form-row">
         <label for="node-input-name"><i class="icon-tag"></i> Name</label>
         <input type="text" id="node-input-name" placeholder="Name">
     </div>
-    
+
 </script>
 
 <!-- Next, some simple help text is provided for the node.                   -->
@@ -90,7 +92,8 @@
             rateUnits: {value: "second"},
             randomFirst: {value:"1", required:true, validate:RED.validators.number()},
             randomLast: {value:"5", required:true, validate:RED.validators.number()},
-            randomUnits: {value: "seconds"}
+            randomUnits: {value: "seconds"},
+            drop: {value:false}
         },
         inputs:1,                // set the number of inputs - only 0 or 1
         outputs:1,               // set the number of outputs - 0 to n
@@ -98,6 +101,7 @@
         label: function() {      // sets the default label contents
             if (this.pauseType == "delay") {
               var units = this.timeoutUnits ? this.timeoutUnits.charAt(0) : "s";
+              if (this.timeoutUnits == "milliseconds") { units = "ms"; }
               return this.name||"delay "+this.timeout+" " + units;
             } else if (this.pauseType == "rate") {
               var units = this.rateUnits ? this.rateUnits.charAt(0) : "s";
@@ -113,10 +117,10 @@
         oneditprepare: function() {
           $( "#node-input-timeout" ).spinner({min:1,max:60});
           $( "#node-input-rate" ).spinner({min:1});
-          
+
           $( "#node-input-randomFirst" ).spinner({min:0});
           $( "#node-input-randomLast" ).spinner({min:1});
-        
+
           if (this.pauseType == "delay") {
             $("#delay-details").show();
             $("#rate-details").hide();
@@ -126,23 +130,23 @@
             $("#rate-details").show();
             $("#random-details").hide();
           } else if (this.pauseType == "random") {
-        	$("#delay-details").hide();
+            $("#delay-details").hide();
             $("#rate-details").hide();
             $("#random-details").show();
           }
-          
+
           if (!this.timeoutUnits) {
             $("#node-input-timeoutUnits option").filter(function() {
-              return $(this).val() == 'seconds'; 
+              return $(this).val() == 'seconds';
             }).attr('selected', true);
           }
-          
+
           if (!this.randomUnits) {
-        	$("#node-input-randomUnits option").filter(function() {
-               return $(this).val() == 'seconds'; 
+            $("#node-input-randomUnits option").filter(function() {
+               return $(this).val() == 'seconds';
             }).attr('selected', true);
           }
-          
+
           $("#node-input-pauseType").on("change",function() {
             if (this.value == "delay") {
               $("#delay-details").show();

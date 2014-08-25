@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  **/
-RED.nodes = function() {
+RED.nodes = (function() {
 
     var node_defs = {};
     var nodes = [];
@@ -45,14 +45,16 @@ RED.nodes = function() {
             nodes.push(n);
             var updatedConfigNode = false;
             for (var d in n._def.defaults) {
-                var property = n._def.defaults[d];
-                if (property.type) {
-                    var type = getType(property.type)
-                    if (type && type.category == "config") {
-                        var configNode = configNodes[n[d]];
-                        if (configNode) {
-                            updatedConfigNode = true;
-                            configNode.users.push(n);
+                if (n._def.defaults.hasOwnProperty(d)) {
+                    var property = n._def.defaults[d];
+                    if (property.type) {
+                        var type = getType(property.type)
+                        if (type && type.category == "config") {
+                            var configNode = configNodes[n[d]];
+                            if (configNode) {
+                                updatedConfigNode = true;
+                                configNode.users.push(n);
+                            }
                         }
                     }
                 }
@@ -96,15 +98,17 @@ RED.nodes = function() {
             }
             var updatedConfigNode = false;
             for (var d in node._def.defaults) {
-                var property = node._def.defaults[d];
-                if (property.type) {
-                    var type = getType(property.type)
-                    if (type && type.category == "config") {
-                        var configNode = configNodes[node[d]];
-                        if (configNode) {
-                            updatedConfigNode = true;
-                            var users = configNode.users;
-                            users.splice(users.indexOf(node),1);
+                if (node._def.defaults.hasOwnProperty(d)) {
+                    var property = node._def.defaults[d];
+                    if (property.type) {
+                        var type = getType(property.type)
+                        if (type && type.category == "config") {
+                            var configNode = configNodes[node[d]];
+                            if (configNode) {
+                                updatedConfigNode = true;
+                                var users = configNode.users;
+                                users.splice(users.indexOf(node),1);
+                            }
                         }
                     }
                 }
@@ -124,7 +128,7 @@ RED.nodes = function() {
     }
 
     function refreshValidation() {
-        for (var n in nodes) {
+        for (var n=0;n<nodes.length;n++) {
             RED.editor.validateNode(nodes[n]);
         }
     }
@@ -139,13 +143,14 @@ RED.nodes = function() {
         delete workspaces[id];
         var removedNodes = [];
         var removedLinks = [];
-        for (var n in nodes) {
+        var n;
+        for (n=0;n<nodes.length;n++) {
             var node = nodes[n];
             if (node.z == id) {
                 removedNodes.push(node);
             }
         }
-        for (var n in removedNodes) {
+        for (n=0;n<removedNodes.length;n++) {
             var rmlinks = removeNode(removedNodes[n].id);
             removedLinks = removedLinks.concat(rmlinks);
         }
@@ -157,10 +162,10 @@ RED.nodes = function() {
         visited[node.id] = true;
         var nns = [node];
         var stack = [node];
-        while(stack.length != 0) {
+        while(stack.length !== 0) {
             var n = stack.shift();
             var childLinks = links.filter(function(d) { return (d.source === n) || (d.target === n);});
-            for (var i in childLinks) {
+            for (var i=0;i<childLinks.length;i++) {
                 var child = (childLinks[i].source === n)?childLinks[i].target:childLinks[i].source;
                 if (!visited[child.id]) {
                     visited[child.id] = true;
@@ -175,12 +180,25 @@ RED.nodes = function() {
     /**
      * Converts a node to an exportable JSON Object
      **/
-    function convertNode(n) {
+    function convertNode(n, exportCreds) {
+        exportCreds = exportCreds || false;
         var node = {};
         node.id = n.id;
         node.type = n.type;
         for (var d in n._def.defaults) {
-            node[d] = n[d];
+            if (n._def.defaults.hasOwnProperty(d)) {
+                node[d] = n[d];
+            }
+        }
+        if(exportCreds && n.credentials) {
+            node.credentials = {};
+            for (var cred in n._def.credentials) {
+                if (n._def.credentials.hasOwnProperty(cred)) {
+                    if (n.credentials[cred] != null) {
+                        node.credentials[cred] = n.credentials[cred];
+                    }
+                }
+            }
         }
         if (n._def.category != "config") {
             node.x = n.x;
@@ -191,8 +209,8 @@ RED.nodes = function() {
                 node.wires.push([]);
             }
             var wires = links.filter(function(d){return d.source === n;});
-            for (var i in wires) {
-                var w = wires[i];
+            for (var j=0;j<wires.length;j++) {
+                var w = wires[j];
                 node.wires[w.sourcePort].push(w.target.id);
             }
         }
@@ -205,7 +223,7 @@ RED.nodes = function() {
     function createExportableNodeSet(set) {
         var nns = [];
         var exportedConfigNodes = {};
-        for (var n in set) {
+        for (var n=0;n<set.length;n++) {
             var node = set[n].n;
             var convertedNode = RED.nodes.convertNode(node);
             for (var d in node._def.defaults) {
@@ -231,24 +249,31 @@ RED.nodes = function() {
     //TODO: rename this (createCompleteNodeSet)
     function createCompleteNodeSet() {
         var nns = [];
-        for (var i in workspaces) {
-            nns.push(workspaces[i]);
+        var i;
+        for (i in workspaces) {
+            if (workspaces.hasOwnProperty(i)) {
+                nns.push(workspaces[i]);
+            }
         }
-        for (var i in configNodes) {
-            nns.push(convertNode(configNodes[i]));
+        for (i in configNodes) {
+            if (configNodes.hasOwnProperty(i)) {
+                nns.push(convertNode(configNodes[i], true));
+            }
         }
-        for (var i in nodes) {
+        for (i=0;i<nodes.length;i++) {
             var node = nodes[i];
-            nns.push(convertNode(node));
+            nns.push(convertNode(node, true));
         }
         return nns;
     }
 
     function importNodes(newNodesObj,createNewIds) {
         try {
+            var i;
+            var n;
             var newNodes;
             if (typeof newNodesObj === "string") {
-                if (newNodesObj == "") {
+                if (newNodesObj === "") {
                     return;
                 }
                 newNodes = JSON.parse(newNodesObj);
@@ -260,8 +285,8 @@ RED.nodes = function() {
                 newNodes = [newNodes];
             }
             var unknownTypes = [];
-            for (var i in newNodes) {
-                var n = newNodes[i];
+            for (i=0;i<newNodes.length;i++) {
+                n = newNodes[i];
                 // TODO: remove workspace in next release+1
                 if (n.type != "workspace" && n.type != "tab" && !getType(n.type)) {
                     // TODO: get this UI thing out of here! (see below as well)
@@ -269,6 +294,11 @@ RED.nodes = function() {
                     n.type = "unknown";
                     if (unknownTypes.indexOf(n.name)==-1) {
                         unknownTypes.push(n.name);
+                    }
+                    if (n.x == null && n.y == null) {
+                        // config node - remove it
+                        newNodes.splice(i,1);
+                        i--;
                     }
                 }
             }
@@ -279,8 +309,8 @@ RED.nodes = function() {
                 //"DO NOT DEPLOY while in this state.<br/>Either, add missing types to Node-RED, restart and then reload page,<br/>or delete unknown "+n.name+", rewire as required, and then deploy.","error");
             }
 
-            for (var i in newNodes) {
-                var n = newNodes[i];
+            for (i=0;i<newNodes.length;i++) {
+                n = newNodes[i];
                 // TODO: remove workspace in next release+1
                 if (n.type === "workspace" || n.type === "tab") {
                     if (n.type === "workspace") {
@@ -303,8 +333,8 @@ RED.nodes = function() {
             var new_nodes = [];
             var new_links = [];
 
-            for (var i in newNodes) {
-                var n = newNodes[i];
+            for (i=0;i<newNodes.length;i++) {
+                n = newNodes[i];
                 // TODO: remove workspace in next release+1
                 if (n.type !== "workspace" && n.type !== "tab") {
                     var def = getType(n.type);
@@ -312,7 +342,9 @@ RED.nodes = function() {
                         if (!RED.nodes.node(n.id)) {
                             var configNode = {id:n.id,type:n.type,users:[]};
                             for (var d in def.defaults) {
-                                configNode[d] = n[d];
+                                if (def.defaults.hasOwnProperty(d)) {
+                                    configNode[d] = n[d];
+                                }
                             }
                             configNode.label = def.label;
                             configNode._def = def;
@@ -342,8 +374,10 @@ RED.nodes = function() {
                         }
                         node.outputs = n.outputs||node._def.outputs;
 
-                        for (var d in node._def.defaults) {
-                            node[d] = n[d];
+                        for (var d2 in node._def.defaults) {
+                            if (node._def.defaults.hasOwnProperty(d2)) {
+                                node[d2] = n[d2];
+                            }
                         }
 
                         addNode(node);
@@ -353,11 +387,11 @@ RED.nodes = function() {
                     }
                 }
             }
-            for (var i in new_nodes) {
-                var n = new_nodes[i];
-                for (var w1 in n.wires) {
+            for (i=0;i<new_nodes.length;i++) {
+                n = new_nodes[i];
+                for (var w1=0;w1<n.wires.length;w1++) {
                     var wires = (n.wires[w1] instanceof Array)?n.wires[w1]:[n.wires[w1]];
-                    for (var w2 in wires) {
+                    for (var w2=0;w2<wires.length;w2++) {
                         if (wires[w2] in node_map) {
                             var link = {source:n,sourcePort:w1,target:node_map[wires[w2]]};
                             addLink(link);
@@ -388,18 +422,20 @@ RED.nodes = function() {
         removeWorkspace: removeWorkspace,
         workspace: getWorkspace,
         eachNode: function(cb) {
-            for (var n in nodes) {
+            for (var n=0;n<nodes.length;n++) {
                 cb(nodes[n]);
             }
         },
         eachLink: function(cb) {
-            for (var l in links) {
+            for (var l=0;l<links.length;l++) {
                 cb(links[l]);
             }
         },
         eachConfig: function(cb) {
             for (var id in configNodes) {
-                cb(configNodes[id]);
+                if (configNodes.hasOwnProperty(id)) {
+                    cb(configNodes[id]);
+                }
             }
         },
         node: getNode,
@@ -412,4 +448,4 @@ RED.nodes = function() {
         nodes: nodes, // TODO: exposed for d3 vis
         links: links  // TODO: exposed for d3 vis
     };
-}();
+})();

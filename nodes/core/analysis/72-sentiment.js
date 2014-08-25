@@ -14,18 +14,20 @@
  * limitations under the License.
  **/
 
-var RED = require(process.env.NODE_RED_HOME+"/red/red");
-var sentiment = require('sentiment');
+module.exports = function(RED) {
+    "use strict";
+    var sentiment = require('sentiment');
 
-function SentimentNode(n) {
-    RED.nodes.createNode(this,n);
-    var node = this;
+    function SentimentNode(n) {
+        RED.nodes.createNode(this,n);
+        var node = this;
 
-    this.on("input", function(msg) {
-        sentiment(msg.payload, function (err, result) {
-            msg.sentiment = result;
-            node.send(msg);
+        this.on("input", function(msg) {
+            sentiment(msg.payload, msg.overrides || null, function (err, result) {
+                msg.sentiment = result;
+                node.send(msg);
+            });
         });
-    });
+    }
+    RED.nodes.registerType("sentiment",SentimentNode);
 }
-RED.nodes.registerType("sentiment",SentimentNode);

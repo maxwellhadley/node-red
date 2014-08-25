@@ -14,6 +14,8 @@
  * limitations under the License.
  **/
 
+var util = require("util");
+
 var redApp = null;
 var storage = null;
 
@@ -29,10 +31,13 @@ function init() {
             });
             req.on('end', function() {
                 storage.saveFlow(req.params[0],fullBody).then(function() {
-                    res.writeHead(204, {'Content-Type': 'text/plain'});
-                    res.end();
+                    res.send(204);
                 }).otherwise(function(err) {
                     util.log("[red] Error loading flow '"+req.params[0]+"' : "+err);
+                    if (err.message.indexOf('forbidden') === 0) {
+                        res.send(403);
+                        return;
+                    }
                     res.send(500);
                 });
             });
@@ -40,20 +45,21 @@ function init() {
     
     redApp.get("/library/flows",function(req,res) {
             storage.getAllFlows().then(function(flows) {
-                res.writeHead(200, {'Content-Type': 'text/plain'});
-                res.write(JSON.stringify(flows));
-                res.end();
+                res.json(flows);
             });
     });
     
     redApp.get(new RegExp("/library/flows\/(.*)"), function(req,res) {
             storage.getFlow(req.params[0]).then(function(data) {
-                res.writeHead(200, {'Content-Type': 'text/plain'});
-                res.write(data);
-                res.end();
+                res.set('Content-Type', 'application/json');
+                res.send(data);
             }).otherwise(function(err) {
                 if (err) {
                     util.log("[red] Error loading flow '"+req.params[0]+"' : "+err);
+                    if (err.message.indexOf('forbidden') === 0) {
+                        res.send(403);
+                        return;
+                    }
                 }
                 res.send(404);
             });
@@ -67,16 +73,20 @@ function createLibrary(type) {
     redApp.get(new RegExp("/library/"+type+"($|\/(.*))"),function(req,res) {
             var path = req.params[1]||"";
             storage.getLibraryEntry(type,path).then(function(result) {
-                res.writeHead(200, {'Content-Type': 'text/plain'});
                 if (typeof result === "string") {
+                    res.writeHead(200, {'Content-Type': 'text/plain'});
                     res.write(result);
+                    res.end(); 
                 } else {
-                    res.write(JSON.stringify(result));
+                    res.json(result);
                 }
-                res.end(); 
             }).otherwise(function(err) {
                 if (err) {
                     util.log("[red] Error loading library entry '"+path+"' : "+err);
+                    if (err.message.indexOf('forbidden') === 0) {
+                        res.send(403);
+                        return;
+                    }
                 }
                 res.send(404);
             });
@@ -93,8 +103,12 @@ function createLibrary(type) {
                         res.send(204);
                     }).otherwise(function(err) {
                         util.log("[red] Error saving library entry '"+path+"' : "+err);
+                        if (err.message.indexOf('forbidden') === 0) {
+                            res.send(403);
+                            return;
+                        }
                         res.send(500);
-                    });;
+                    });
             });
     });
 }
