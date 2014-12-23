@@ -15,26 +15,29 @@
  **/
  
 var should = require("should");
+var sinon = require("sinon");
 var when = require("when");
 var flows = require("../../../red/nodes/flows");
 var RedNode = require("../../../red/nodes/Node");
 var RED = require("../../../red/nodes");
 var events = require("../../../red/events");
+var typeRegistry = require("../../../red/nodes/registry");
+
+
+var settings = {
+    available: function() { return false; }
+}
 
 function loadFlows(testFlows, cb) {
     var storage = {
         getFlows: function() {
-            var defer = when.defer();
-            defer.resolve(testFlows);
-            return defer.promise;
+            return when.resolve(testFlows);
         },
         getCredentials: function() {
-            var defer = when.defer();
-            defer.resolve({});
-            return defer.promise;
-        },
+            return when.resolve({});
+        }
     };
-    RED.init({}, storage);
+    RED.init(settings, storage);
     flows.load().then(function() {
         should.deepEqual(testFlows, flows.getFlows());
         cb();
@@ -43,6 +46,12 @@ function loadFlows(testFlows, cb) {
 
 describe('flows', function() {
 
+    afterEach(function(done) {
+        flows.clear().then(function() {
+            loadFlows([],done);
+        });
+    });
+    
     describe('#add',function() {
         it('should be called by node constructor',function(done) {
             var n = new RedNode({id:'123',type:'abc'});
@@ -76,24 +85,86 @@ describe('flows', function() {
         });
 
         it('should load and start an empty tab flow',function(done) {
-            loadFlows([{"type":"tab","id":"tab1","label":"Sheet 1"}],
-                      function() {});
+            loadFlows([{"type":"tab","id":"tab1","label":"Sheet 1"}], function() {});
             events.once('nodes-started', function() { done(); });
         });
 
         it('should load and start a registered node type', function(done) {
             RED.registerType('debug', function() {});
+            var typeRegistryGet = sinon.stub(typeRegistry,"get",function(nt) {
+                return function() {};
+            });
             loadFlows([{"id":"n1","type":"debug"}], function() { });
-            events.once('nodes-started', function() { done(); });
+            events.once('nodes-started', function() {
+                typeRegistryGet.restore();
+                done();
+            });
         });
 
-        it('should load and start when node type is registered',
-           function(done) {
-               loadFlows([{"id":"n2","type":"inject"}],
-                         function() {
-                             RED.registerType('inject', function() { });
-                         });
-            events.once('nodes-started', function() { done(); });
+        it('should load and start when node type is registered', function(done) {
+            var typeRegistryGet = sinon.stub(typeRegistry,"get");
+            typeRegistryGet.onCall(0).returns(null);
+            typeRegistryGet.returns(function(){});
+            
+            loadFlows([{"id":"n2","type":"inject"}], function() {
+                events.emit('type-registered','inject');
+            });
+            events.once('nodes-started', function() {
+                typeRegistryGet.restore();
+                done();
+            });
+        });
+        
+        it('should not instantiate nodes of an unused subflow', function(done) {
+            RED.registerType('abc', function() {});
+            var typeRegistryGet = sinon.stub(typeRegistry,"get",function(nt) {
+                return function() {};
+            });
+            loadFlows([{"id":"n1","type":"subflow",inputs:[],outputs:[],wires:[]},
+                       {"id":"n2","type":"abc","z":"n1",wires:[]}
+                      ],function() { });
+            events.once('nodes-started', function() {
+                (flows.get("n2") == null).should.be.true;
+                var ncount = 0
+                flows.each(function(n) {
+                    ncount++;
+                });
+                ncount.should.equal(0);
+                console.log(ncount);
+                typeRegistryGet.restore();
+                done();
+            });
+        });
+        it('should instantiate nodes of an used subflow with new IDs', function(done) {
+            RED.registerType('abc', function() {});
+            var typeRegistryGet = sinon.stub(typeRegistry,"get",function(nt) {
+                return RedNode;
+            });
+            loadFlows([{"id":"n1","type":"subflow",inputs:[],outputs:[]},
+                       {"id":"n2","type":"abc","z":"n1","name":"def",wires:[]},
+                       {"id":"n3","type":"subflow:n1"}
+                      ], function() { });
+            events.once('nodes-started', function() {
+                // n2 should not get instantiated with that id
+                (flows.get("n2") == null).should.be.true;
+                var ncount = 0
+                var nodes = [];
+                flows.each(function(n) {
+                    nodes.push(n);
+                });
+                nodes.should.have.lengthOf(2);
+                
+                // Assume the nodes are instantiated in this order - not
+                // a requirement, but makes the test easier to write.
+                nodes[0].should.have.property("id","n3");
+                nodes[0].should.have.property("type","subflow:n1");
+                nodes[1].should.not.have.property("id","n2");
+                nodes[1].should.have.property("name","def");
+                
+                // TODO: verify instance wiring is correct
+                typeRegistryGet.restore();
+                done();
+            });
         });
     });
 
@@ -112,7 +183,7 @@ describe('flows', function() {
                     return when(true);
                 }
             };
-            RED.init({}, storage);
+            RED.init(settings, storage);
             flows.setFlows(testFlows);
             events.once('nodes-started', function() { done(); });
         });

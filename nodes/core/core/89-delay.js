@@ -1,5 +1,5 @@
 /**
- * Copyright 2013 IBM Corp.
+ * Copyright 2013, 2014 IBM Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,10 @@
 //Simple node to introduce a pause into a flow
 module.exports = function(RED) {
     "use strict";
+
+    var MILLIS_TO_NANOS = 1000000;
+    var SECONDS_TO_NANOS = 1000000000;
+
     function random(n) {
         var wait = n.randomFirst + (n.diff * Math.random());
         if (n.buffer.length > 0) {
@@ -80,7 +84,7 @@ module.exports = function(RED) {
         this.buffer = [];
         this.intervalID = -1;
         this.randomID = -1;
-        this.lastSent = Date.now();
+        this.lastSent;
         this.drop = n.drop;
         var node = this;
 
@@ -128,9 +132,15 @@ module.exports = function(RED) {
                         },node.rate);
                     }
                 } else {
-                    var now = Date.now();
-                    if (now-node.lastSent > node.rate) {
-                        node.lastSent = now;
+                    var timeSinceLast;
+                    if (node.lastSent) {
+                        timeSinceLast = process.hrtime(node.lastSent);
+                    }
+                    if (!node.lastSent) { // ensuring that we always send the first message
+                        node.lastSent = process.hrtime();
+                        node.send(msg);
+                    } else if ( ( (timeSinceLast[0] * SECONDS_TO_NANOS) + timeSinceLast[1] ) > (node.rate * MILLIS_TO_NANOS) ) {
+                        node.lastSent = process.hrtime();
                         node.send(msg);
                     }
                 }
@@ -139,6 +149,34 @@ module.exports = function(RED) {
             this.on("close", function() {
                 clearInterval(this.intervalID);
                 this.buffer = [];
+            });
+
+        } else if (this.pauseType === "queue") {
+            this.intervalID = setInterval(function() {
+                if (node.buffer.length > 0) {
+                    node.send(node.buffer.shift()); // send the first on the queue
+                }
+                node.status({text:node.buffer.length});
+                //console.log(node.buffer);
+            },node.rate);
+
+            this.on("input", function(msg) {
+                if (!msg.hasOwnProperty("topic")) { msg.topic = "_none_"; }
+                var hit = false;
+                for (var b in node.buffer) { // check if already in queue
+                    if (msg.topic === node.buffer[b].topic) {
+                        node.buffer[b] = msg; // if so - replace existing entry
+                        hit = true;
+                    }
+                }
+                if (!hit) { node.buffer.push(msg); } // if not add to end of queue
+                node.status({text:node.buffer.length});
+            });
+
+            this.on("close", function() {
+                clearInterval(this.intervalID);
+                this.buffer = [];
+                node.status({text:node.buffer.length});
             });
 
         } else if (this.pauseType === "random") {

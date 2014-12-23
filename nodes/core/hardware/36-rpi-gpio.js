@@ -1,5 +1,5 @@
 /**
- * Copyright 2013 IBM Corp.
+ * Copyright 2013,2014 IBM Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,11 +20,13 @@ module.exports = function(RED) {
     var exec = require('child_process').exec;
     var fs =  require('fs');
 
+    var gpioCommand = '/usr/local/bin/gpio';
+
     if (!fs.existsSync("/dev/ttyAMA0")) { // unlikely if not on a Pi
         throw "Info : Ignoring Raspberry Pi specific node.";
     }
 
-    if (!fs.existsSync("/usr/local/bin/gpio")) { // gpio command not installed
+    if (!fs.existsSync(gpioCommand)) { // gpio command not installed
         throw "Info : Can't find Raspberry Pi wiringPi gpio command.";
     }
 
@@ -97,14 +99,16 @@ module.exports = function(RED) {
         this.buttonState = -1;
         this.pin = pintable[n.pin];
         this.intype = n.intype;
+        this.read = n.read || false;
+        if (this.read) { this.buttonState = -2; }
         var node = this;
 
         if (node.pin !== undefined) {
-            exec("gpio mode "+node.pin+" "+node.intype, function(err,stdout,stderr) {
+            exec(gpioCommand+" mode "+node.pin+" "+node.intype, function(err,stdout,stderr) {
                 if (err) { node.error(err); }
                 else {
                     node._interval = setInterval( function() {
-                        exec("gpio read "+node.pin, function(err,stdout,stderr) {
+                        exec(gpioCommand+" read "+node.pin, function(err,stdout,stderr) {
                             if (err) { node.error(err); }
                             else {
                                 if (node.buttonState !== Number(stdout)) {
@@ -133,26 +137,35 @@ module.exports = function(RED) {
     function GPIOOutNode(n) {
         RED.nodes.createNode(this,n);
         this.pin = pintable[n.pin];
+        this.set = n.set || false;
+        this.level = n.level || 0;
+        this.out = n.out || "out";
         var node = this;
+        (node.out === "pwm") ? (node.op = "pwm") : (node.op = "write");
 
         if (node.pin !== undefined) {
-            process.nextTick(function() {
-                exec("gpio mode "+node.pin+" out", function(err,stdout,stderr) {
-                    if (err) { node.error(err); }
-                    else {
-                        node.on("input", function(msg) {
-                            if (msg.payload === "true") { msg.payload = true; }
-                            if (msg.payload === "false") { msg.payload = false; }
-                            var out = Number(msg.payload);
-                            if ((out === 0)|(out === 1)) {
-                                exec("gpio write "+node.pin+" "+out, function(err,stdout,stderr) {
-                                    if (err) { node.error(err); }
-                                });
-                            }
-                            else { node.warn("Invalid input - not 0 or 1"); }
+            exec(gpioCommand+" mode "+node.pin+" "+node.out, function(err,stdout,stderr) {
+                if (err) { node.error(err); }
+                else {
+                    if (node.set && (node.out === "out")) {
+                        exec(gpioCommand+" write "+node.pin+" "+node.level, function(err,stdout,stderr) {
+                            if (err) { node.error(err); }
                         });
                     }
-                });
+                    node.on("input", function(msg) {
+                        if (msg.payload === "true") { msg.payload = true; }
+                        if (msg.payload === "false") { msg.payload = false; }
+                        var out = Number(msg.payload);
+                        var limit = 1;
+                        if (node.out === "pwm") { limit = 1023; }
+                        if ((out >= 0) && (out <= limit)) {
+                            exec(gpioCommand+" "+node.op+" "+node.pin+" "+out, function(err,stdout,stderr) {
+                                if (err) { node.error(err); }
+                            });
+                        }
+                        else { node.warn("Invalid input: "+out); }
+                    });
+                }
             });
         }
         else {
@@ -160,27 +173,14 @@ module.exports = function(RED) {
         }
 
         node.on("close", function() {
-            exec("gpio mode "+node.pin+" in");
+            exec(gpioCommand+" mode "+node.pin+" in");
         });
     }
 
-    //exec("gpio mode 0 in",function(err,stdout,stderr) {
-    //    if (err) {
-    //        util.log('[36-rpi-gpio.js] Error: "gpio" command failed for some reason.');
-    //    }
-    //    exec("gpio mode 1 in");
-    //    exec("gpio mode 2 in");
-    //    exec("gpio mode 3 in");
-    //    exec("gpio mode 4 in");
-    //    exec("gpio mode 5 in");
-    //    exec("gpio mode 6 in");
-    //    exec("gpio mode 7 in");
-    //});
-
     var pitype = { type:"" };
-    exec("gpio -v | grep Type", function(err,stdout,stderr) {
+    exec(gpioCommand+" -v | grep Type", function(err,stdout,stderr) {
         if (err) {
-            util.log('[36-rpi-gpio.js] Error: "gpio -v" command failed for some reason.');
+            util.log('[36-rpi-gpio.js] Error: "'+gpioCommand+' -v" command failed for some reason.');
         }
         else {
             pitype = { type:(stdout.split(","))[0].split(": ")[1], rev:(stdout.split(","))[1].split(": ")[1] };
@@ -190,9 +190,7 @@ module.exports = function(RED) {
     RED.nodes.registerType("rpi-gpio in",GPIOInNode);
     RED.nodes.registerType("rpi-gpio out",GPIOOutNode);
 
-    var querystring = require('querystring');
     RED.httpAdmin.get('/rpi-gpio/:id',function(req,res) {
-        var credentials = RED.nodes.getCredentials(req.params.id);
         res.send( JSON.stringify(pitype) );
     });
 }

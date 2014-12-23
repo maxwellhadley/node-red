@@ -33,6 +33,7 @@ var oldCredentialsFile;
 var userDir;
 var libDir;
 var libFlowsDir;
+var globalSettingsFile;
 
 function listFiles(dir) {
     var dirs = {};
@@ -120,6 +121,25 @@ function getFileBody(root,path) {
     return body;
 }
 
+/** 
+ * Write content to a file using UTF8 encoding.
+ * This forces a fsync before completing to ensure
+ * the write hits disk.
+ */
+function writeFile(path,content) {
+    return when.promise(function(resolve,reject) {
+        var stream = fs.createWriteStream(path);
+        stream.on('open',function(fd) {
+            stream.end(content,'utf8',function() {
+                fs.fsync(fd,resolve);
+            });
+        });
+        stream.on('error',function(err) {
+            reject(err);
+        });
+    });
+}
+
 var localfilesystem = {
     init: function(_settings) {
         settings = _settings;
@@ -140,6 +160,9 @@ var localfilesystem = {
         libDir = fspath.join(userDir,"lib");
         libFlowsDir = fspath.join(libDir,"flows");
 
+        
+        globalSettingsFile = fspath.join(userDir,".config.json");
+        
         return promiseDir(libFlowsDir);
     },
 
@@ -171,8 +194,7 @@ var localfilesystem = {
         } else {
             flowData = JSON.stringify(flows);
         }
-        
-        return nodeFn.call(fs.writeFile, flowsFullPath, flowData);
+        return writeFile(flowsFullPath, flowData);
     },
 
     getCredentials: function() {
@@ -204,10 +226,31 @@ var localfilesystem = {
         } else {
             credentialData = JSON.stringify(credentials);
         }
-        
-        return nodeFn.call(fs.writeFile, credentialsFile, credentialData)
+        return writeFile(credentialsFile, credentialData);
     },
-
+    
+    getSettings: function() {
+        if (fs.existsSync(globalSettingsFile)) {
+            return nodeFn.call(fs.readFile,globalSettingsFile,'utf8').then(function(data) {
+                if (data) {
+                    try {
+                        return JSON.parse(data);
+                    } catch(err) {
+                        util.log("[red] Corrupted config detected - resetting");
+                        return {};
+                    }
+                } else {
+                    return {};
+                }
+            });
+        }
+        return when.resolve({});
+    },
+    saveSettings: function(settings) {
+        return writeFile(globalSettingsFile,JSON.stringify(settings,null,1));
+    },
+    
+    
     getAllFlows: function() {
         return listFiles(libFlowsDir);
     },
@@ -228,7 +271,7 @@ var localfilesystem = {
     saveFlow: function(fn,data) {
         var file = fspath.join(libFlowsDir,fn+".json");
         return promiseDir(fspath.dirname(file)).then(function () {
-            return nodeFn.call(fs.writeFile, file, data);
+            return writeFile(file,data);
         });
     },
 
@@ -275,7 +318,7 @@ var localfilesystem = {
             }
         }
         return promiseDir(fspath.dirname(fn)).then(function () {
-            nodeFn.call(fs.writeFile, fn, headers+body);
+            writeFile(fn,headers+body);
         });
     }
 };

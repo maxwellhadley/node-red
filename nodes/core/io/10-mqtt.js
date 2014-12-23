@@ -17,6 +17,7 @@
 module.exports = function(RED) {
     "use strict";
     var connectionPool = require("./lib/mqttConnectionPool");
+    var isUtf8 = require('is-utf8');
 
     function MQTTBrokerNode(n) {
         RED.nodes.createNode(this,n);
@@ -45,11 +46,12 @@ module.exports = function(RED) {
             this.client = connectionPool.get(this.brokerConfig.broker,this.brokerConfig.port,this.brokerConfig.clientid,this.brokerConfig.username,this.brokerConfig.password);
             var node = this;
             this.client.subscribe(this.topic,2,function(topic,payload,qos,retain) {
-                    var msg = {topic:topic,payload:payload,qos:qos,retain:retain};
-                    if ((node.brokerConfig.broker == "localhost")||(node.brokerConfig.broker == "127.0.0.1")) {
-                        msg._topic = topic;
-                    }
-                    node.send(msg);
+                if (isUtf8(payload)) { payload = payload.toString(); }
+                var msg = {topic:topic,payload:payload,qos:qos,retain:retain};
+                if ((node.brokerConfig.broker === "localhost")||(node.brokerConfig.broker === "127.0.0.1")) {
+                    msg._topic = topic;
+                }
+                node.send(msg);
             });
             this.client.on("connectionlost",function() {
                 node.status({fill:"red",shape:"ring",text:"disconnected"});
@@ -78,25 +80,26 @@ module.exports = function(RED) {
         this.brokerConfig = RED.nodes.getNode(this.broker);
 
         if (this.brokerConfig) {
-            this.status({fill:"red",shape:"ring",text:"disconnected"},true);
+            this.status({fill:"red",shape:"ring",text:"disconnected"});
             this.client = connectionPool.get(this.brokerConfig.broker,this.brokerConfig.port,this.brokerConfig.clientid,this.brokerConfig.username,this.brokerConfig.password);
             var node = this;
             this.on("input",function(msg) {
-                if (msg != null) {
-                    if (msg.qos) {
-                        msg.qos = parseInt(msg.qos);
-                        if ((msg.qos !== 0) && (msg.qos !== 1) && (msg.qos !== 2)) {
-                            msg.qos = null;
-                        }
+                if (msg.qos) {
+                    msg.qos = parseInt(msg.qos);
+                    if ((msg.qos !== 0) && (msg.qos !== 1) && (msg.qos !== 2)) {
+                        msg.qos = null;
                     }
-                    msg.qos = Number(node.qos || msg.qos || 0);
-                    msg.retain = node.retain || msg.retain || false;
-                    msg.retain = ((msg.retain === true) || (msg.retain === "true")) || false;
-                    if (node.topic) {
-                        msg.topic = node.topic;
-                    }
-                    this.client.publish(msg);
                 }
+                msg.qos = Number(node.qos || msg.qos || 0);
+                msg.retain = node.retain || msg.retain || false;
+                msg.retain = ((msg.retain === true) || (msg.retain === "true")) || false;
+                if (node.topic) {
+                    msg.topic = node.topic;
+                }
+                if ((msg.hasOwnProperty("topic")) && (typeof msg.topic === "string") && (msg.topic !== "")) { // topic must exist
+                    this.client.publish(msg);  // send the message
+                }
+                else { node.warn("Invalid topic specified"); }
             });
             this.client.on("connectionlost",function() {
                 node.status({fill:"red",shape:"ring",text:"disconnected"});

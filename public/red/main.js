@@ -42,9 +42,9 @@ var RED = (function() {
         event.preventDefault();
     });
 
-
     function save(force) {
         if (RED.view.dirty()) {
+            //$("#debug-tab-clear").click();  // uncomment this to auto clear debug on deploy
 
             if (!force) {
                 var invalid = false;
@@ -73,11 +73,11 @@ var RED = (function() {
                 }
             }
             var nns = RED.nodes.createCompleteNodeSet();
-            
+
             $("#btn-icn-deploy").removeClass('fa-download');
             $("#btn-icn-deploy").addClass('spinner');
             RED.view.dirty(false);
-            
+
             $.ajax({
                 url:"flows",
                 type: "POST",
@@ -142,60 +142,117 @@ var RED = (function() {
     });
 
     function loadSettings() {
-        $.get('settings', function(data) {
-            RED.settings = data;
-            console.log("Node-RED: "+data.version);
-            loadNodes();
+        RED.settings.init(loadNodeList);
+    }
+
+    function loadNodeList() {
+        $.ajax({
+            headers: {
+                "Accept":"application/json"
+            },
+            cache: false,
+            url: 'nodes',
+            success: function(data) {
+                RED.nodes.setNodeList(data);
+                loadNodes();
+            }
         });
     }
+
     function loadNodes() {
-        $.get('nodes', function(data) {
-            $("body").append(data);
-            $(".palette-spinner").hide();
-            $(".palette-scroll").show();
-            $("#palette-search").show();
-            loadFlows();
+        $.ajax({
+            headers: {
+                "Accept":"text/html"
+            },
+            cache: false,
+            url: 'nodes',
+            success: function(data) {
+                $("body").append(data);
+                $(".palette-spinner").hide();
+                $(".palette-scroll").show();
+                $("#palette-search").show();
+                loadFlows();
+            }
         });
     }
 
     function loadFlows() {
-        $.getJSON("flows",function(nodes) {
-            RED.nodes.import(nodes);
-            RED.view.dirty(false);
-            RED.view.redraw();
-            RED.comms.subscribe("status/#",function(topic,msg) {
-                var parts = topic.split("/");
-                var node = RED.nodes.node(parts[1]);
-                if (node) {
-                    node.status = msg;
-                    if (statusEnabled) {
-                        node.dirty = true;
-                        RED.view.redraw();
-                    }
-                }
-            });
-            RED.comms.subscribe("node/#",function(topic,msg) {
-                var i;
-                if (topic == "node/added") {
-                    for (i=0;i<msg.length;i++) {
-                        var m = msg[i];
-                        var id = m.id;
-                        $.get('nodes/'+id, function(data) {
-                            $("body").append(data);
-                            var typeList = "<ul><li>"+m.types.join("</li><li>")+"</li></ul>";
-                            RED.notify("Node"+(m.types.length!=1 ? "s":"")+" added to palette:"+typeList,"success");
-                        });
-                    }
-                } else if (topic == "node/removed") {
-                    if (msg.types) {
-                        for (i=0;i<msg.types.length;i++) {
-                            RED.palette.remove(msg.types[i]);
+        $.ajax({
+            headers: {
+                "Accept":"application/json"
+            },
+            cache: false,
+            url: 'flows',
+            success: function(nodes) {
+                RED.nodes.import(nodes);
+                RED.view.dirty(false);
+                RED.view.redraw();
+                RED.comms.subscribe("status/#",function(topic,msg) {
+                    var parts = topic.split("/");
+                    var node = RED.nodes.node(parts[1]);
+                    if (node) {
+                        node.status = msg;
+                        if (statusEnabled) {
+                            node.dirty = true;
+                            RED.view.redraw();
                         }
-                        var typeList = "<ul><li>"+msg.types.join("</li><li>")+"</li></ul>";
-                        RED.notify("Node"+(msg.types.length!=1 ? "s":"")+" removed from palette:"+typeList,"success");
                     }
-                }
-            });
+                });
+                RED.comms.subscribe("node/#",function(topic,msg) {
+                    var i,m;
+                    var typeList;
+                    var info;
+
+                    if (topic == "node/added") {
+                        var addedTypes = [];
+                        for (i=0;i<msg.length;i++) {
+                            m = msg[i];
+                            var id = m.id;
+                            RED.nodes.addNodeSet(m);
+                            if (m.loaded) {
+                                addedTypes = addedTypes.concat(m.types);
+                                $.get('nodes/'+id, function(data) {
+                                    $("body").append(data);
+                                });
+                            }
+                        }
+                        if (addedTypes.length) {
+                            typeList = "<ul><li>"+addedTypes.join("</li><li>")+"</li></ul>";
+                            RED.notify("Node"+(addedTypes.length!=1 ? "s":"")+" added to palette:"+typeList,"success");
+                        }
+                    } else if (topic == "node/removed") {
+                        for (i=0;i<msg.length;i++) {
+                            m = msg[i];
+                            info = RED.nodes.removeNodeSet(m.id);
+                            if (info.added) {
+                                typeList = "<ul><li>"+m.types.join("</li><li>")+"</li></ul>";
+                                RED.notify("Node"+(m.types.length!=1 ? "s":"")+" removed from palette:"+typeList,"success");
+                            }
+                        }
+                    } else if (topic == "node/enabled") {
+                        if (msg.types) {
+                            info = RED.nodes.getNodeSet(msg.id);
+                            if (info.added) {
+                                RED.nodes.enableNodeSet(msg.id);
+                                typeList = "<ul><li>"+msg.types.join("</li><li>")+"</li></ul>";
+                                RED.notify("Node"+(msg.types.length!=1 ? "s":"")+" enabled:"+typeList,"success");
+                            } else {
+                                $.get('nodes/'+msg.id, function(data) {
+                                    $("body").append(data);
+                                    typeList = "<ul><li>"+msg.types.join("</li><li>")+"</li></ul>";
+                                    RED.notify("Node"+(msg.types.length!=1 ? "s":"")+" added to palette:"+typeList,"success");
+                                });
+                            }
+                        }
+                    } else if (topic == "node/disabled") {
+                        if (msg.types) {
+                            RED.nodes.disableNodeSet(msg.id);
+                            typeList = "<ul><li>"+msg.types.join("</li><li>")+"</li></ul>";
+                            RED.notify("Node"+(msg.types.length!=1 ? "s":"")+" disabled:"+typeList,"success");
+                        }
+                    }
+                });
+            }
         });
     }
 
@@ -204,7 +261,7 @@ var RED = (function() {
         statusEnabled = state;
         RED.view.status(statusEnabled);
     }
-    
+
     function showHelp() {
 
         var dialog = $('#node-help');
@@ -226,7 +283,7 @@ var RED = (function() {
     $(function() {
         RED.menu.init({id:"btn-sidemenu",
             options: [
-                {id:"btn-sidebar",icon:"fa fa-columns",label:"Sidebar",toggle:true,onselect:RED.sidebar.toggleSidebar},
+                {id:"btn-sidebar",icon:"fa fa-columns",label:"Sidebar",toggle:true,onselect:RED.sidebar.toggleSidebar, selected: true},
                 null,
                 {id:"btn-node-status",icon:"fa fa-info",label:"Node Status",toggle:true,onselect:toggleStatus},
                 null,
@@ -241,6 +298,9 @@ var RED = (function() {
                 null,
                 {id:"btn-config-nodes",icon:"fa fa-th-list",label:"Configuration nodes...",onselect:RED.sidebar.config.show},
                 null,
+                {id:"btn-create-subflow",icon:"fa fa-share-alt",label:"Create subflow",onselect:RED.view.createSubflow},
+                {id:"btn-convert-subflow",icon:"fa fa-share-alt",label:"Convert to subflow",disabled:true,onselect:RED.view.convertToSubflow},
+                null,
                 {id:"btn-workspace-menu",icon:"fa fa-th-large",label:"Workspaces",options:[
                     {id:"btn-workspace-add",icon:"fa fa-plus",label:"Add"},
                     {id:"btn-workspace-edit",icon:"fa fa-pencil",label:"Rename"},
@@ -252,12 +312,15 @@ var RED = (function() {
                 {id:"btn-help",icon:"fa fa-question",label:"Help...", href:"http://nodered.org/docs"}
             ]
         });
-        
 
         RED.keyboard.add(/* ? */ 191,{shift:true},function(){showHelp();d3.event.preventDefault();});
         loadSettings();
         RED.comms.connect();
     });
+
+    if ((window.location.hostname !== "localhost") && (window.location.hostname !== "127.0.0.1")) {
+        document.title = "Node-RED : "+window.location.hostname;
+    }
 
     return {
     };

@@ -18,6 +18,11 @@ module.exports = function(RED) {
     "use strict";
     var util = require("util");
     var ArduinoFirmata = require('arduino-firmata');
+    var fs = require('fs');
+    var plat = require('os').platform();
+    var portlist = ArduinoFirmata.list(function (err, ports) {
+        portlist = ports;
+    });
 
     // The Board Definition - this opens (and closes) the connection
     function ArduinoNode(n) {
@@ -26,13 +31,17 @@ module.exports = function(RED) {
         this.repeat = n.repeat||25;
         //node.log("opening connection "+this.device);
         var node = this;
-
         node.board = new ArduinoFirmata();
-        node.board.connect(node.device);
+        if (portlist.indexOf(node.device) === -1) {
+            node.warn("Device "+node.device+" not found");
+        }
+        else {
+            node.board.connect(node.device);
+        }
 
-        node.board.on('connect', function(){
+        node.board.on('boardReady', function(){
             node.log("version "+node.board.boardVersion);
-        })
+        });
 
         node.on('close', function() {
             if (node.board) {
@@ -121,7 +130,7 @@ module.exports = function(RED) {
                         msg.payload = msg.payload * 1;
                         if ((msg.payload >= 0) && (msg.payload <= 255)) {
                             //console.log(msg.payload, node.pin);
-                            node.board.servoWrite(node.pin, msg.payload);
+                            node.board.analogWrite(node.pin, msg.payload);
                         }
                     }
                     if (node.state == "SERVO") {

@@ -23,7 +23,6 @@ module.exports = function(RED) {
     var getBody = require('raw-body');
     var mustache = require("mustache");
     var querystring = require("querystring");
-
     var cors = require('cors');
     var jsonParser = express.json();
     var urlencParser = express.urlencoded();
@@ -66,7 +65,7 @@ module.exports = function(RED) {
                 } else {
                     node.send({req:req,res:res});
                 }
-            }
+            };
 
             var corsHandler = function(req,res,next) { next(); }
 
@@ -82,7 +81,7 @@ module.exports = function(RED) {
             } else if (this.method == "put") {
                 RED.httpNode.put(this.url,corsHandler,jsonParser,urlencParser,rawBodyParser,this.callback,this.errorHandler);
             } else if (this.method == "delete") {
-                RED.httpNode.delete(this.url,corsHandler,this.callback,errorHandler);
+                RED.httpNode.delete(this.url,corsHandler,this.callback,this.errorHandler);
             }
 
             this.on("close",function() {
@@ -94,11 +93,13 @@ module.exports = function(RED) {
                     }
                 }
                 if (RED.settings.httpNodeCors) {
-                    var route = RED.httpNode.route['options'];
-                    for (var j = 0; j<route.length; j++) {
-                        if (route[j].path == this.url) {
-                            route.splice(j,1);
-                            //break;
+                    var routes = RED.httpNode.routes['options'];
+                    if (routes) {
+                        for (var j = 0; j<routes.length; j++) {
+                            if (routes[j].path == this.url) {
+                                routes.splice(j,1);
+                                //break;
+                            }
                         }
                     }
                 }
@@ -142,16 +143,21 @@ module.exports = function(RED) {
     }
     RED.nodes.registerType("http response",HTTPOut);
 
+
     function HTTPRequest(n) {
         RED.nodes.createNode(this,n);
         var nodeUrl = n.url;
         var isTemplatedUrl = (nodeUrl||"").indexOf("{{") != -1;
         var nodeMethod = n.method || "GET";
+        this.ret = n.ret || "txt";
         var node = this;
         this.on("input",function(msg) {
             node.status({fill:"blue",shape:"dot",text:"requesting"});
             var url;
             if (msg.url) {
+                if (n.url && (n.url !== msg.url)) {
+                    node.warn("Deprecated: msg properties should not override set node properties. See bit.ly/nr-override-msg-props");
+                }
                 url = msg.url;
             } else if (isTemplatedUrl) {
                 url = mustache.render(nodeUrl,msg);
@@ -163,15 +169,32 @@ module.exports = function(RED) {
                 url = "http://"+url;
             }
 
-            var method = (msg.method||nodeMethod).toUpperCase();
-            //node.log(method+" : "+url);
+            var method;
+            if (msg.method) {                               // if method set in msg
+                if (n.method && (n.method !== "use")) {     // warn if override option not set
+                    node.warn("Deprecated: msg properties should not override fixed node properties. Use explicit override option. See bit.ly/nr-override-msg-props");
+                }
+                method = msg.method.toUpperCase();          // but use it anyway
+            } else {
+                if (n.method !== "use") {
+                    method = nodeMethod.toUpperCase();      // otherwise use the selected method
+                } else {                                    // unless they selected override
+                    method = "GET";                         // - in which case default to GET
+                }
+            }
             var opts = urllib.parse(url);
             opts.method = method;
             opts.headers = {};
             if (msg.headers) {
                 for (var v in msg.headers) {
                     if (msg.headers.hasOwnProperty(v)) {
-                        opts.headers[v.toLowerCase()] = msg.headers[v];
+                        var name = v.toLowerCase();
+                        if (name !== "content-type" && name !== "content-length") {
+                            // only normalise the known headers used later in this
+                            // function. Otherwise leave them alone.
+                            name = v;
+                        }
+                        opts.headers[name] = msg.headers[v];
                     }
                 }
             }
@@ -201,7 +224,7 @@ module.exports = function(RED) {
             }
 
             var req = ((/^https/.test(url))?https:http).request(opts,function(res) {
-                res.setEncoding('utf8');
+                (node.ret === "bin") ? res.setEncoding('binary') : res.setEncoding('utf8');
                 msg.statusCode = res.statusCode;
                 msg.headers = res.headers;
                 msg.payload = "";
@@ -209,6 +232,13 @@ module.exports = function(RED) {
                     msg.payload += chunk;
                 });
                 res.on('end',function() {
+                    if (node.ret === "bin") {
+                        msg.payload = new Buffer(msg.payload,"binary");
+                    }
+                    else if (node.ret === "obj") {
+                        try { msg.payload = JSON.parse(msg.payload); }
+                        catch(e) { node.warn("JSON parse error"); }
+                    }
                     node.send(msg);
                     node.status({});
                 });

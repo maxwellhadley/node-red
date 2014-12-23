@@ -26,17 +26,17 @@ describe('TailNode', function() {
 
     var resourcesDir = path.join(__dirname,"..","..","..","resources");
     var fileToTail = path.join(resourcesDir,"28-tail-test-file.txt");
-    fs.writeFile(fileToTail, "Tail message line 1\nTail message line 2\n", function (err) {
-        if (err) { console.log('cannot write to '+fileToTail); }
-    });
 
     beforeEach(function(done) {
+        fs.writeFileSync(fileToTail, "Tail message line 1\nTail message line 2\n");
         helper.startServer(done);
     });
 
     afterEach(function(done) {
-        helper.unload();
-        helper.stopServer(done);
+        helper.unload().then(function() {
+            fs.unlinkSync(fileToTail);
+            helper.stopServer(done);
+        });
     });
 
     it('should be loaded', function(done) {
@@ -63,7 +63,10 @@ describe('TailNode', function() {
                     done();
                 }
             });
-            fs.appendFileSync(fileToTail, "Tail message line 3\nTail message line 4\n");
+            setTimeout( function() {
+                fs.appendFileSync(fileToTail, "Tail message line 3\n");
+                fs.appendFileSync(fileToTail, "Tail message line 4\n");
+            },100);
         });
     });
 
@@ -79,11 +82,31 @@ describe('TailNode', function() {
                 msg.payload.should.equal("Tail message line 5\nTail message line 6\n");
                 done();
             });
-            fs.appendFile(fileToTail, "Tail message line 5\nTail message line 6\n");
+            setTimeout( function() {
+                fs.appendFileSync(fileToTail, "Tail message line 5\nTail message line 6\n");
+            },150);
         });
     });
 
-    it('tail should handle file going away and coming back', function(done) {
+    it('tail should handle a non-existent file', function(done) {
+        fs.unlinkSync(fileToTail);
+        var flow = [{id:"tailNode1", type:"tail", name: "tailNode", "split":true, "filename":fileToTail, "wires":[["helperNode1"]]},
+                    {id:"helperNode1", type:"helper", wires:[]}];
+        helper.load(tailNode, flow, function() {
+            var tailNode1 = helper.getNode("tailNode1");
+            var helperNode1 = helper.getNode("helperNode1");
+            helperNode1.on("input", function(msg) {
+                msg.should.have.property('topic', fileToTail);
+                msg.payload.should.equal("Tail message line");
+                done();
+            });
+            setTimeout( function() {
+                fs.writeFileSync(fileToTail, "Tail message line\n");
+            },150);
+        });
+    });
+    /*
+    it('tail should handle file truncation', function(done) {
         var flow = [{id:"tailNode1", type:"tail", name: "tailNode", "split":true, "filename":fileToTail, "wires":[["helperNode1"]]},
                     {id:"helperNode1", type:"helper", wires:[]}];
         helper.load(tailNode, flow, function() {
@@ -93,20 +116,50 @@ describe('TailNode', function() {
             var warned = false;
             tailNode1.on("log", function(msg) {
                 if (msg.level == "warn") { warned = true; }
-                if ((inputCounter === 3)&&(warned === true)) { done(); }
             });
             helperNode1.on("input", function(msg) {
+                console.log("inputCounter =",inputCounter);
+                console.log(msg);
                 msg.should.have.property('topic', fileToTail);
-                msg.payload.should.equal("Tail message line A");
-                inputCounter += 1;
-                if ((inputCounter === 3)&&(warned === true)) { done(); }
+                inputCounter++;
+                if (inputCounter === 1) {
+                    warned.should.be.false;
+                    msg.payload.should.equal("Tail message line append");
+                } else if (inputCounter === 2) {
+                    msg.payload.should.equal("Tail message line truncate");
+                } else {
+                    msg.payload.should.equal("Tail message line append "+inputCounter);
+                }
+                
+                if (inputCounter === 5) {
+                    setTimeout(function() {
+                        warned.should.be.true;
+                        done();
+                    },100);
+                }
             });
-            fs.writeFileSync(fileToTail, "Tail message line A\n");
+            var actions = [
+                function() { fs.appendFileSync(fileToTail, "Tail message line append\n");},
+                function() { fs.writeFileSync(fileToTail, "Tail message line truncate\n");},
+                function() { fs.appendFileSync(fileToTail, "Tail message line append 3\n");},
+                function() { fs.appendFileSync(fileToTail, "Tail message line append 4\n");},
+                function() { fs.appendFileSync(fileToTail, "Tail message line append 5\n");}
+            ];
+            
+            function processAction() {
+                var action = actions.shift();
+                action();
+                if (actions.length > 0) {
+                    setTimeout(function() {
+                        processAction();
+                    },250);
+                }
+            }
             setTimeout( function() {
-                fs.appendFileSync(fileToTail, "Tail message line A\n");
-                fs.appendFileSync(fileToTail, "Tail message line A\n");
-            },250);
+                processAction();
+            },150);
         });
     });
+    */
 
 });

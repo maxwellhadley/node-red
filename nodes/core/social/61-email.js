@@ -16,7 +16,6 @@
 
 module.exports = function(RED) {
     "use strict";
-    var util = require('util');
     var nodemailer = require("nodemailer");
     var Imap = require('imap');
 
@@ -70,35 +69,28 @@ module.exports = function(RED) {
         });
 
         this.on("input", function(msg) {
-            if (msg != null) {
-                if (smtpTransport) {
-                    node.status({fill:"blue",shape:"dot",text:"sending"});
-                    var payload = msg.payload;
-                    if (Buffer.isBuffer(payload)) {
-                        payload = payload.toString();
-                    } else if (typeof payload === "object") {
-                        payload = JSON.stringify(payload);
-                    } else if (typeof payload !== "string") {
-                        payload = ""+payload;
-                    }
-                    
-                    smtpTransport.sendMail({
-                        from: node.userid, // sender address
-                        to: node.name, // comma separated list of receivers
-                        subject: msg.topic, // subject line
-                        text: payload // plaintext body
-                    }, function(error, info) {
-                        if (error) {
-                            node.error(error);
-                            node.status({fill:"red",shape:"ring",text:"send failed"});
-                        } else {
-                            node.log("Message sent: " + info.response);
-                            node.status({});
-                        }
-                    });
+            if (smtpTransport) {
+                node.status({fill:"blue",shape:"dot",text:"sending"});
+                var payload = RED.util.ensureString(msg.payload);
+                if (msg.to && node.name && (msg.to !== node.name)) {
+                    node.warn("Deprecated: msg properties should not override set node properties. See bit.ly/nr-override-msg-props");
                 }
-                else { node.warn("No Email credentials found. See info panel."); }
+                smtpTransport.sendMail({
+                    from: node.userid, // sender address
+                    to: msg.to || node.name, // comma separated list of addressees
+                    subject: msg.topic, // subject line
+                    text: payload // plaintext body
+                }, function(error, info) {
+                    if (error) {
+                        node.error(error);
+                        node.status({fill:"red",shape:"ring",text:"send failed"});
+                    } else {
+                        node.log("Message sent: " + info.response);
+                        node.status({});
+                    }
+                });
             }
+            else { node.warn("No Email credentials found. See info panel."); }
         });
     }
     RED.nodes.registerType("e-mail",EmailNode,{
@@ -106,17 +98,17 @@ module.exports = function(RED) {
             userid: {type:"text"},
             password: {type: "password"},
             global: { type:"boolean"}
-        }       
+        }
     });
 
     function EmailInNode(n) {
         RED.nodes.createNode(this,n);
         this.name = n.name;
         this.repeat = n.repeat * 1000 || 300000;
-        this.inserver = n.server || emailkey.server || "imap.gmail.com";
-        this.inport = n.port || emailkey.port || "993";
+        this.inserver = n.server || globalkeys.server || "imap.gmail.com";
+        this.inport = n.port || globalkeys.port || "993";
         var flag = false;
-        
+
         if (this.credentials && this.credentials.hasOwnProperty("userid")) {
             this.userid = this.credentials.userid;
         } else {
@@ -185,7 +177,7 @@ module.exports = function(RED) {
                                         pay.date = Imap.parseHeader(buffer).date[0];
                                     } else {
                                         var parts = buffer.split("Content-Type");
-                                        for (var p in parts) {
+                                        for (var p = 0; p < parts.length; p++) {
                                             if (parts[p].indexOf("text/plain") >= 0) {
                                                 pay.payload = parts[p].split("\n").slice(1,-2).join("\n").trim();
                                             }
@@ -252,6 +244,6 @@ module.exports = function(RED) {
             userid: {type:"text"},
             password: {type: "password"},
             global: { type:"boolean"}
-        }       
+        }
     });
-}
+};
